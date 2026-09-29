@@ -309,6 +309,19 @@ for (const el of waterways) {
     for (const j of nb) if (j >= 0 && !barrier[j] && !sea[j]) { sea[j] = 1; stack.push(j); }
   }
   let n = 0;
+  for (let i = 0; i < IW * IH; i++) n += sea[i];
+  if (n / (IW * IH) > 0.6) {
+    // The fill leaked through a gap in the coastline. Fall back to: on each row, everything west
+    // of the westernmost coastline pixel is sea (the Vasai-Virar coast faces west).
+    console.warn(`sea fill leaked (${(n / (IW * IH) * 100).toFixed(0)}%), using west-of-coast fallback`);
+    sea.fill(0);
+    for (let y = 0; y < IH; y++) {
+      let x0 = -1;
+      for (let x = 0; x < IW; x++) if (barrier[y * IW + x]) { x0 = x; break; }
+      for (let x = 0; x < x0; x++) sea[y * IW + x] = 1;
+    }
+  }
+  n = 0;
   for (let i = 0; i < IW * IH; i++) if (sea[i]) { n++; rgba[i * 4 + 3] = 0; rgba[i * 4] = 60; rgba[i * 4 + 1] = 105; rgba[i * 4 + 2] = 120; }
   console.log(`coastline ways: ${coast.length}, sea fraction ${(n / (IW * IH) * 100).toFixed(1)}%`);
 }

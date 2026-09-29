@@ -8,8 +8,10 @@ Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright
 
 ## Map data
 
-Raw OSM data lives in `data/raw/` and is fetched by the **Fetch OSM data** GitHub
-Actions workflow (`scripts/fetch-osm.sh`). Run it from the Actions tab to refresh.
+Raw OSM data lives in `data/raw/`. The **Fetch OSM data** GitHub Actions workflow
+downloads the Geofabrik extract of western India, clips it to the Vasai-Virar belt
+with osmium and splits it into layers (`scripts/fetch-osm.sh`). Run it from the
+Actions tab to refresh the map.
 
 ## Running locally
 
