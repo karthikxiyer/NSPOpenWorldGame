@@ -199,12 +199,15 @@ export class World {
   nearestPlace(x: number, z: number): NamedPoint | null {
     let best: NamedPoint | null = null, bd = Infinity;
     for (const p of this.index.places) {
+      // the whole-city label is only a fallback
+      if (p.t === 'city' || p.t === 'town') continue;
       // neighbourhoods are small, suburbs/villages cover more ground
       const w = p.t === 'neighbourhood' || p.t === 'hamlet' ? 1.3 : 1;
       const d = Math.hypot(p.x - x, p.z - z) * w;
       if (d < bd) { bd = d; best = p; }
     }
-    return bd < 2500 ? best : null;
+    if (bd < 2500) return best;
+    return this.index.places.find((p) => p.t === 'city' || p.t === 'town') ?? null;
   }
 
   /** Find a road point near (x,z) — used to park the vehicles at spawn. */

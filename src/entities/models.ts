@@ -3,11 +3,13 @@ import * as THREE from 'three';
 // Low-poly models built from primitives. All models face -Z (forward) with +Y up and origin on the ground.
 
 const matCache = new Map<string, THREE.Material>();
-function mat(color: string, opts: { emissive?: string; metal?: boolean } = {}): THREE.Material {
-  const k = `${color}|${opts.emissive ?? ''}|${opts.metal ? 1 : 0}`;
+function mat(color: string, opts: { emissive?: string; metal?: boolean; glass?: boolean } = {}): THREE.Material {
+  const k = `${color}|${opts.emissive ?? ''}|${opts.metal ? 1 : 0}|${opts.glass ? 1 : 0}`;
   let m = matCache.get(k);
   if (!m) {
-    m = opts.metal
+    m = opts.glass
+      ? new THREE.MeshPhongMaterial({ color, shininess: 30, specular: new THREE.Color('#3a4650') })
+      : opts.metal
       ? new THREE.MeshPhongMaterial({ color, shininess: 90, specular: new THREE.Color('#ffffff') })
       : new THREE.MeshLambertMaterial({ color, emissive: opts.emissive ?? '#000000' });
     matCache.set(k, m);
@@ -273,7 +275,7 @@ export function makeHarrierKaziranga(): VehicleModel {
   const beige = mat('#b8a47e');
   const pianoBlack = mat('#0d0d0d', { metal: true });
   const cladding = '#262626';
-  const glass = mat('#1d262e', { metal: true });
+  const glass = mat('#1d262e', { glass: true });
   const L = 4.6, W = 1.9;
   const R = 0.37;
 

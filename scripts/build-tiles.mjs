@@ -531,7 +531,7 @@ const png = encodePNG(IW, IH, rgba);
 fs.writeFileSync(path.join(OUT, 'ground.png'), png);
 
 const byName = (re) => stations.find((s) => re.test(s.n));
-const nsp = byName(/nala ?sopara/i) || stations[0] || { x: 0, z: 0 };
+const nsp = byName(/nal+a ?sopara/i) || stations[0] || { x: 0, z: 0 };
 const world = {
   origin: { lat: LAT0, lon: LON0 },
   scale: { kx: KX, kz: KZ },

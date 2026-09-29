@@ -68,11 +68,12 @@ async function start() {
   const sp = spawnPoint();
   await world.preload(sp.x, sp.z, setLoading);
 
-  // park both vehicles on the nearest proper road, one behind the other
+  // park both vehicles on the nearest proper road: the bike ahead with a clear road,
+  // the Harrier far enough behind that it stays out of the spawn camera
   const road = world.nearestRoadPoint(sp.x, sp.z, 1, 5) ?? { x: sp.x, z: sp.z, heading: 0 };
   const fx = -Math.sin(road.heading), fz = -Math.cos(road.heading);
   bike.place(road.x, road.z, road.heading);
-  harrier.place(road.x - fx * 6, road.z - fz * 6, road.heading);
+  harrier.place(road.x - fx * 12, road.z - fz * 12, road.heading);
   // player stands on the kerb side next to the bike, facing it
   player.place(road.x + fz * 1.6 + fx * 0.5, road.z - fx * 1.6 + fz * 0.5, road.heading - Math.PI / 2);
   camYaw = road.heading;
