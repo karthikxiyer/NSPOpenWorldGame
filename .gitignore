@@ -3,3 +3,4 @@ dist/
 data/raw/*.json
 .DS_Store
 *.log
+public/world/

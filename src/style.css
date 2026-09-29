@@ -1,0 +1,180 @@
+:root {
+  --ink: #1d1f24;
+  --paper: rgba(255, 252, 244, 0.92);
+  --accent: #f5c518;
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans Devanagari', sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #c9dff0;
+  color: var(--ink);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#game { display: block; width: 100vw; height: 100vh; height: 100dvh; }
+
+#hud { position: fixed; inset: 0; pointer-events: none; }
+
+#area {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  color: #fff;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+#area-en { font-size: 22px; font-weight: 700; letter-spacing: 0.02em; }
+#area-mr { font-size: 16px; opacity: 0.9; }
+
+#prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 22%;
+  transform: translateX(-50%);
+  background: var(--paper);
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+
+#speedo {
+  position: absolute;
+  right: 16px;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  background: rgba(20, 20, 24, 0.75);
+  color: #fff;
+  border-radius: 14px;
+  padding: 8px 16px;
+  text-align: center;
+  min-width: 120px;
+}
+#speed { font-size: 38px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--accent); line-height: 1.1; }
+#speedo .unit { font-size: 12px; opacity: 0.8; }
+#vehicle-name { font-size: 12px; margin-top: 4px; opacity: 0.9; }
+
+#help-btn {
+  pointer-events: auto;
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--paper);
+  font-weight: 800;
+  font-size: 18px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+#attrib {
+  pointer-events: auto;
+  position: absolute;
+  left: 16px;
+  bottom: max(6px, env(safe-area-inset-bottom));
+  font-size: 11px;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+#attrib a { color: #fff; }
+
+#loading, #help {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(20, 24, 30, 0.55);
+  padding: 16px;
+}
+#loading { background: linear-gradient(160deg, #1d1f24, #3a3222); }
+#loading[hidden], #help[hidden] { display: none; }
+
+.panel {
+  background: var(--paper);
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 520px;
+  width: 100%;
+  box-shadow: var(--shadow);
+}
+.panel h1 { margin: 0; font-size: 28px; }
+.panel h2 { margin-top: 0; }
+.panel .sub { margin: 4px 0 16px; opacity: 0.7; }
+.bar { height: 8px; background: #ddd; border-radius: 4px; overflow: hidden; }
+#load-bar { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+#load-text { font-size: 14px; opacity: 0.8; }
+
+.panel table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.panel th, .panel td { text-align: left; padding: 6px 4px; border-bottom: 1px solid #0001; }
+.panel button#help-close {
+  margin-top: 16px;
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 16px;
+  cursor: pointer;
+}
+.touch-only { display: none; }
+body.touch .touch-only { display: block; }
+
+/* touch controls */
+#touch { position: fixed; inset: 0; pointer-events: none; }
+#stick-zone { position: absolute; left: 0; bottom: 0; width: 45%; height: 60%; pointer-events: auto; }
+#stick-base {
+  position: absolute;
+  left: 40px;
+  bottom: 40px;
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  border: 2px solid rgba(255, 255, 255, 0.45);
+}
+#stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.75);
+}
+#touch-buttons {
+  position: absolute;
+  right: 20px;
+  bottom: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+}
+.tbtn {
+  pointer-events: auto;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  background: rgba(20, 20, 24, 0.55);
+  color: #fff;
+  font-weight: 800;
+  font-size: 22px;
+}
+.tbtn.small { width: 60px; height: 60px; font-size: 13px; }
+.tbtn.active { background: rgba(245, 197, 24, 0.8); color: #111; }

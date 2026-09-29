@@ -1,0 +1,58 @@
+name: Build and deploy
+
+# Builds the map tiles from data/raw and the game bundle on every push.
+# Deploys to GitHub Pages from the default branch (enable Pages with "Source: GitHub Actions").
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build map tiles
+        run: |
+          if [ ! -f data/raw/meta.json ]; then
+            echo "::error::data/raw is empty. Run the 'Fetch OSM data' workflow first."
+            exit 1
+          fi
+          npm run build:tiles
+
+      - name: Typecheck and bundle
+        run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref_name == github.event.repository.default_branch
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
