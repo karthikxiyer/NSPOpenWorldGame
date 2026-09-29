@@ -199,3 +199,35 @@ body.touch .touch-only { display: block; }
 }
 #hint[hidden] { display: none; }
 body.touch #hint { bottom: auto; top: max(64px, env(safe-area-inset-top)); }
+
+#title {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 16px 16px max(28px, env(safe-area-inset-bottom));
+  pointer-events: none;
+  color: #fff;
+  text-shadow: 0 2px 10px rgba(58, 47, 69, 0.55);
+  transition: opacity 0.6s;
+}
+#title[hidden] { display: none; }
+#title.fade { opacity: 0; }
+#title h1 { margin: 0; font-size: clamp(44px, 9vw, 88px); letter-spacing: 0.12em; font-weight: 800; }
+#title .sub { margin: 2px 0 18px; font-size: 18px; opacity: 0.95; }
+#title .buttons { display: flex; gap: 14px; pointer-events: auto; }
+#title button {
+  min-width: 132px;
+  padding: 14px 22px;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  background: rgba(58, 47, 69, 0.55);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#title button:hover { background: #f08a24; border-color: #f08a24; }
+#title .foot { margin: 16px 0 0; font-size: 12px; opacity: 0.85; }

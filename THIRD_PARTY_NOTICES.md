@@ -4,7 +4,7 @@
 
 The cel shading (`src/core/toon.ts`), the ink / grade / FXAA pipeline (`src/core/post.ts`), the
 inverted-hull outlines (`src/core/outline.ts`), the painted sky dome (`src/core/sky.ts`) and the
-flat-world-bent-onto-a-planet approach (`src/planet/planet.ts`) are adapted from
+idea of a flat world bent onto a small planet (`src/world/curve.ts`) are adapted from
 [Sakura Crossing](https://github.com/Kenton-GMI/sakura-crossing).
 
 ```
@@ -33,5 +33,6 @@ SOFTWARE.
 
 ## OpenStreetMap
 
-Place names and the order of places along the loop come from OpenStreetMap.
+Roads, buildings, railway, platforms, landcover and place names come from OpenStreetMap
+(`data/raw/`, a Geofabrik extract).
 Map data © OpenStreetMap contributors, available under the Open Database License (ODbL).

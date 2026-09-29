@@ -1,6 +1,6 @@
 import type { InputState } from '../input/Input';
 import { makeCB350RS, makeHarrierKaziranga, type VehicleModel } from '../art/vehicleModels';
-import type { Terrain } from '../loop/Terrain';
+import type { Terrain } from '../world/Terrain';
 
 export interface VehicleSpec {
   id: 'cb350rs' | 'harrier';

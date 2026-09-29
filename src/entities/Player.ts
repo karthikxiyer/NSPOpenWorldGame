@@ -1,7 +1,7 @@
 import type * as THREE from 'three';
 import type { InputState } from '../input/Input';
 import { animateWalk, blobShadows, makePerson, poseSeated, type PersonModel } from '../art/vehicleModels';
-import type { Terrain } from '../loop/Terrain';
+import type { Terrain } from '../world/Terrain';
 import type { Vehicle } from './Vehicle';
 
 const WALK = 3.2;

@@ -1,10 +1,7 @@
 import * as THREE from 'three';
-import { bend, CIRCUMFERENCE, wrapX } from '../planet/planet';
 
 /**
- * Accumulates flat, vertex-coloured triangles (with UVs) and, at the end, bakes them into
- * bent meshes — one per ~100 m chunk of the loop and per material, so the renderer can
- * frustum-cull chunks behind the curve of the planet.
+ * Accumulates flat, vertex-coloured triangles (with UVs) into one geometry.
  */
 export class Batch {
   pos: number[] = [];
@@ -74,6 +71,24 @@ export class Batch {
     g.dispose();
   }
 
+  /** Append a pre-flattened template (see template()) transformed by a matrix — much faster than geometry(). */
+  stamp(t: Template, m: THREE.Matrix4, color: THREE.ColorRepresentation): void {
+    const e = m.elements;
+    const col = Batch.c.set(color);
+    const p = t.pos, n = t.nrm;
+    for (let i = 0; i < p.length; i += 3) {
+      const x = p[i], y = p[i + 1], z = p[i + 2];
+      this.pos.push(e[0] * x + e[4] * y + e[8] * z + e[12], e[1] * x + e[5] * y + e[9] * z + e[13], e[2] * x + e[6] * y + e[10] * z + e[14]);
+      const nx = n[i], ny = n[i + 1], nz = n[i + 2];
+      let ax = e[0] * nx + e[4] * ny + e[8] * nz, ay = e[1] * nx + e[5] * ny + e[9] * nz, az = e[2] * nx + e[6] * ny + e[10] * nz;
+      const l = Math.hypot(ax, ay, az) || 1;
+      ax /= l; ay /= l; az /= l;
+      this.nrm.push(ax, ay, az);
+      this.col.push(col.r, col.g, col.b);
+      this.uv.push(0.02, 0.02);
+    }
+  }
+
   get empty(): boolean {
     return this.pos.length === 0;
   }
@@ -88,34 +103,14 @@ export class Batch {
   }
 }
 
-const CHUNK = 100;
-export const CHUNKS = Math.ceil(CIRCUMFERENCE / CHUNK);
+export interface Template {
+  pos: Float32Array;
+  nrm: Float32Array;
+}
 
-/** Batches bucketed by loop position and material key. */
-export class ChunkedBatches {
-  private chunks = new Map<string, Batch>();
-
-  /** The batch for material `key` at loop position `x`. */
-  at(x: number, key: string): Batch {
-    const i = Math.floor(wrapX(x) / CHUNK) % CHUNKS;
-    const k = `${key}:${i}`;
-    let b = this.chunks.get(k);
-    if (!b) this.chunks.set(k, (b = new Batch()));
-    return b;
-  }
-
-  /** Bend every batch onto the planet and return meshes. */
-  bake(materials: Record<string, THREE.Material>, opts: { castShadow?: (key: string) => boolean } = {}): THREE.Mesh[] {
-    const out: THREE.Mesh[] = [];
-    for (const [k, b] of this.chunks) {
-      if (b.empty) continue;
-      const key = k.split(':')[0];
-      const mesh = new THREE.Mesh(bend(b.toGeometry(), 6), materials[key]);
-      mesh.castShadow = opts.castShadow ? opts.castShadow(key) : true;
-      mesh.receiveShadow = true;
-      mesh.name = k;
-      out.push(mesh);
-    }
-    return out;
-  }
+/** Flatten a geometry once so it can be stamped many times. */
+export function template(geo: THREE.BufferGeometry): Template {
+  const g = geo.index ? geo.toNonIndexed() : geo;
+  if (!g.attributes.normal) g.computeVertexNormals();
+  return { pos: new Float32Array(g.attributes.position.array), nrm: new Float32Array(g.attributes.normal.array) };
 }

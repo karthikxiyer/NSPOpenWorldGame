@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#f0e2d2" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <title>NSP Loop</title>
-    <meta name="description" content="A 1 km miniature-planet loop from 3rd Road Taaki to Nalla Sopara station. Ride a Honda CB350RS or drive a Tata Harrier Kaziranga." />
+    <title>NSP Nallasopara</title>
+    <meta name="description" content="Real Nallasopara West as a tiny planet: ride a Honda CB350RS or drive a Tata Harrier Kaziranga from the 3rd Road Taaki to Nalla Sopara station." />
   </head>
   <body>
     <canvas id="game"></canvas>
@@ -51,12 +51,22 @@
       </div>
     </div>
 
+    <div id="title" hidden>
+      <h1>NSP</h1>
+      <p class="sub">Nallasopara West · नालासोपारा</p>
+      <div class="buttons">
+        <button id="btn-ride">Ride</button>
+        <button id="btn-walk">Walk</button>
+      </div>
+      <p class="foot">Start at the 3rd Road Taaki · real streets from OpenStreetMap</p>
+    </div>
+
     <div id="loading">
       <div class="panel">
-        <h1>NSP Loop</h1>
+        <h1>NSP</h1>
         <p class="sub">3rd Road Taaki · Nalla Sopara · नालासोपारा</p>
         <div class="bar"><div id="load-bar"></div></div>
-        <p id="load-text">Building the loop…</p>
+        <p id="load-text">Loading Nallasopara…</p>
       </div>
     </div>
 

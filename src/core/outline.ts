@@ -9,19 +9,24 @@
 import * as THREE from 'three';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PAL } from './palette';
+import { CURVE, CURVE_GLSL } from '../world/curve';
 
 const VERT = /* glsl */ `
   uniform float uThickness;
   uniform vec2 uResolution;
+  ${CURVE_GLSL}
   void main() {
-    vec4 mv = modelViewMatrix * vec4( position, 1.0 );
-    vec3 n = normalize( normalMatrix * normal );
+    vec4 wp = vec4( position, 1.0 );
+    vec3 n = normal;
     #ifdef USE_INSTANCING
-      mv = modelViewMatrix * instanceMatrix * vec4( position, 1.0 );
-      n = normalize( normalMatrix * mat3( instanceMatrix ) * normal );
+      wp = instanceMatrix * wp;
+      n = mat3( instanceMatrix ) * n;
     #endif
-    vec4 clip = projectionMatrix * mv;
-    vec3 clipN = normalize( ( projectionMatrix * vec4( n, 0.0 ) ).xyz );
+    wp = modelMatrix * wp;
+    vec3 wn = curveNormal( normalize( mat3( modelMatrix ) * n ), wp.xyz );
+    wp.xyz = curvePos( wp.xyz );
+    vec4 clip = projectionMatrix * viewMatrix * wp;
+    vec3 clipN = normalize( ( projectionMatrix * viewMatrix * vec4( wn, 0.0 ) ).xyz );
     vec2 aspect = vec2( uResolution.y / uResolution.x, 1.0 );
     clip.xy += clipN.xy * aspect * uThickness * clip.w * 0.5;
     gl_Position = clip;
@@ -59,7 +64,7 @@ function smoothed(geo: THREE.BufferGeometry): THREE.BufferGeometry {
 export function hullOutline(mesh: THREE.Mesh, thickness = 0.0034): THREE.Mesh | null {
   if (!mesh.geometry) return null;
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uThickness: { value: thickness }, uColor: { value: new THREE.Color(PAL.ink) }, uResolution: { value: resolution.clone() } },
+    uniforms: { uThickness: { value: thickness }, uColor: { value: new THREE.Color(PAL.ink) }, uResolution: { value: resolution.clone() }, ...CURVE },
     vertexShader: VERT, fragmentShader: FRAG, side: THREE.BackSide,
   });
   materials.add(mat);
@@ -73,6 +78,7 @@ export function hullOutline(mesh: THREE.Mesh, thickness = 0.0034): THREE.Mesh | 
     shell = s;
   } else shell = new THREE.Mesh(smoothed(mesh.geometry), mat);
   shell.userData.isOutline = true;
+  shell.frustumCulled = false;
   shell.renderOrder = (mesh.renderOrder || 0) - 1;
   mesh.add(shell);
   return shell;

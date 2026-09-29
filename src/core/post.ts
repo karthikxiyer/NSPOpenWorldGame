@@ -173,6 +173,12 @@ export class Pipeline {
     this.ink.mat.uniforms.uThickness.value = 1.05 + 0.55 * scale;
   }
 
+  /** Call after changing camera.near/far so the ink pass linearises depth correctly. */
+  setClip(near: number, far: number): void {
+    this.ink.mat.uniforms.uNear.value = near;
+    this.ink.mat.uniforms.uFar.value = far;
+  }
+
   render(): void {
     const r = this.renderer;
     r.setRenderTarget(this.rtScene);

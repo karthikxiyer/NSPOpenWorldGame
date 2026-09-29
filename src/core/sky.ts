@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { PAL } from './palette';
 import { flat } from './toon';
 import { rngKit } from './rng';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 function cloudTexture(): THREE.Texture {
   const c = document.createElement('canvas');
@@ -80,22 +81,31 @@ export class Sky {
     const tex = cloudTexture();
     const matA = flat({ color: PAL.cloud, map: tex, transparent: true, opacity: 0.8, depthWrite: false, fog: false });
     const matB = flat({ color: PAL.cloudShade, map: tex, transparent: true, opacity: 0.45, depthWrite: false, fog: false });
+    // clouds: billboards facing the middle, merged into two meshes (front puffs and shade)
     const rng = rngKit(7781);
+    const fronts: THREE.BufferGeometry[] = [], backs: THREE.BufferGeometry[] = [];
+    const o = new THREE.Object3D();
     for (let i = 0; i < 20; i++) {
       const r = rng.range(230, 330), a = rng.range(0, Math.PI * 2);
       const w = rng.range(80, 190), h = w * rng.range(0.32, 0.42);
       const y = rng.range(28, 120);
-      const g = new THREE.Group();
-      const back = new THREE.Mesh(new THREE.PlaneGeometry(w, h), matB);
-      back.position.set(2, -h * 0.08, -1.5);
-      g.add(back, new THREE.Mesh(new THREE.PlaneGeometry(w, h), matA));
-      g.position.set(Math.cos(a) * r, y, Math.sin(a) * r);
-      g.lookAt(0, y * 0.55, 0);
-      g.children.forEach((m) => (m.renderOrder = -9));
-      this.rig.add(g);
+      o.position.set(Math.cos(a) * r, y, Math.sin(a) * r);
+      o.lookAt(0, y * 0.55, 0);
+      o.updateMatrix();
+      fronts.push(new THREE.PlaneGeometry(w, h).applyMatrix4(o.matrix));
+      backs.push(new THREE.PlaneGeometry(w, h).translate(2, -h * 0.08, -1.5).applyMatrix4(o.matrix));
     }
+    const back = new THREE.Mesh(mergeGeometries(backs)!, matB);
+    const front = new THREE.Mesh(mergeGeometries(fronts)!, matA);
+    back.renderOrder = front.renderOrder = -9;
+    back.frustumCulled = front.frustumCulled = false;
+    this.rig.add(back, front);
     this.rig.matrixAutoUpdate = false;
     scene.add(this.rig);
+  }
+
+  setClouds(visible: boolean): void {
+    this.rig.children.forEach((c, i) => { if (i > 0) c.visible = visible; });
   }
 
   /** Seat the sky in the player's local frame, centred on the camera. */

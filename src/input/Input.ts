@@ -59,7 +59,7 @@ export class Input {
 
   private setupTouch() {
     document.body.classList.add('touch');
-    document.getElementById('touch')!.hidden = false;
+    // the touch controls are revealed by the game once play starts (not on the title screen)
     const zone = document.getElementById('stick-zone')!;
     const base = document.getElementById('stick-base')!;
     const knob = document.getElementById('stick-knob')!;

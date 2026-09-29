@@ -4,10 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "dev": "node scripts/build-patch.mjs && vite",
+    "build": "node scripts/build-patch.mjs && tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:patch": "node scripts/build-patch.mjs"
   },
   "dependencies": {
     "three": "^0.170.0"
@@ -17,5 +18,5 @@
     "typescript": "^5.9.3",
     "vite": "^6.4.3"
   },
-  "description": "NSP Loop: a 1 km miniature-planet ride around 3rd Road Taaki and Nalla Sopara, cel-shaded in Three.js."
+  "description": "Real Nallasopara West from OpenStreetMap as a tiny cel-shaded planet that unrolls into a wrap-around map."
 }
