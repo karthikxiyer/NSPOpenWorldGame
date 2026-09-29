@@ -25,6 +25,10 @@ export class World {
   private roadMat = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   private railMat = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
   private seaMat!: THREE.MeshLambertMaterial;
+  /** bumps whenever tiles load or unload, so road graphs know to rebuild */
+  version = 0;
+  /** extra moving obstacles (traffic, animals, trains) that block the player */
+  dynamicCollider: ((x: number, z: number, r: number) => PushResult) | null = null;
 
   constructor(private loadRadius: number) {}
 
@@ -165,6 +169,7 @@ export class World {
     this.root.add(group);
     const grid = new FootprintGrid(data.buildings.map((bd) => bd.p));
     this.loaded.set(key, { key, group, grid, data });
+    this.version++;
   }
 
   private unload(t: LoadedTile): void {
@@ -173,6 +178,12 @@ export class World {
       if (o instanceof THREE.Mesh) o.geometry.dispose();
     });
     this.loaded.delete(t.key);
+    this.version++;
+  }
+
+  /** Data of every tile currently loaded. */
+  loadedTiles(): TileData[] {
+    return [...this.loaded.values()].map((t) => t.data);
   }
 
   collide(x: number, z: number, r: number): PushResult {
@@ -180,6 +191,23 @@ export class World {
     const ts = this.index.tileSize;
     const cx = Math.floor(x / ts), cz = Math.floor(z / ts);
     // buildings are bucketed by centroid, so look in neighbouring tiles too
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      const t = this.loaded.get(`${cx + dx}_${cz + dz}`);
+      if (t) grids.push(t.grid);
+    }
+    const res = resolveCircle(grids, x, z, r);
+    if (this.dynamicCollider) {
+      const d = this.dynamicCollider(res.x, res.z, r);
+      if (d.hit) return d;
+    }
+    return res;
+  }
+
+  /** Static-only collision (buildings), for agents that shouldn't collide with each other here. */
+  collideStatic(x: number, z: number, r: number): PushResult {
+    const grids: FootprintGrid[] = [];
+    const ts = this.index.tileSize;
+    const cx = Math.floor(x / ts), cz = Math.floor(z / ts);
     for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
       const t = this.loaded.get(`${cx + dx}_${cz + dz}`);
       if (t) grids.push(t.grid);

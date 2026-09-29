@@ -6,6 +6,19 @@ Tata Harrier Kaziranga edition across the Vasai-Virar belt.
 
 Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), ODbL.
 
+## What's in the world
+
+- You start at the **3rd Road Taaki** board in Shriprastha, Nallasopara West, next to the
+  Honda CB350RS, with the Harrier parked behind (change it in `src/config.ts`).
+- **Traffic** follows the real road network, keeps left and respects one-way streets:
+  auto-rickshaws, cars, scooters, tempos and buses (on main roads only).
+- **Pedestrians** walk along the streets, crowding around shops, eateries and stations.
+- **Animals**: cows (solid, and they often sit in the road), stray dogs and goats that scatter
+  from fast vehicles.
+- **Local trains**: 12-car Western Railway locals stop at Naigaon, Vasai Road, Nalla Sopara and
+  Virar; an 8-car train runs on the Vasai Road - Diva branch via Juichandra and Kaman Road.
+  Level-crossing gates close as trains approach and traffic waits for them.
+
 ## Map data
 
 Raw OSM data lives in `data/raw/`. The **Fetch OSM data** GitHub Actions workflow

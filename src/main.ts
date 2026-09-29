@@ -1,8 +1,12 @@
 import * as THREE from 'three';
 import './style.css';
+import { LIFE_DESKTOP, LIFE_MOBILE, START } from './config';
 import { Player } from './entities/Player';
 import { CB350RS, HARRIER, Vehicle } from './entities/Vehicle';
 import { Input } from './input/Input';
+import { Life } from './life/Life';
+import { signBoard } from './life/models';
+import type { Body } from './life/Spatial';
 import { Hud, hideLoading, setLoading, showError } from './ui/Hud';
 import { World } from './world/World';
 
@@ -51,37 +55,71 @@ let lastLook = -10;
 const camPos = new THREE.Vector3();
 const camTarget = new THREE.Vector3();
 
-function spawnPoint(): { x: number; z: number } {
+function project(lat: number, lon: number): { x: number; z: number } {
+  const { origin, scale } = world.index;
+  return { x: (lon - origin.lon) * scale.kx, z: -(lat - origin.lat) * scale.kz };
+}
+
+/** ?at=lat,lon overrides the default start (the 3rd Road Taaki board). */
+function spawnPoint(): { x: number; z: number; board: boolean } {
   const q = new URLSearchParams(location.search).get('at');
   if (q) {
     const [lat, lon] = q.split(',').map(Number);
-    if (!isNaN(lat) && !isNaN(lon)) {
-      const { origin, scale } = world.index;
-      return { x: (lon - origin.lon) * scale.kx, z: -(lat - origin.lat) * scale.kz };
-    }
+    if (!isNaN(lat) && !isNaN(lon)) return { ...project(lat, lon), board: false };
   }
-  return world.index.spawn;
+  return { ...project(START.lat, START.lon), board: true };
 }
+
+let life: Life | null = null;
 
 async function start() {
   await world.init(setLoading);
   const sp = spawnPoint();
   await world.preload(sp.x, sp.z, setLoading);
 
-  // park both vehicles on the nearest proper road: the bike ahead with a clear road,
+  // park both vehicles on the nearest road: the bike ahead with a clear road,
   // the Harrier far enough behind that it stays out of the spawn camera
-  const road = world.nearestRoadPoint(sp.x, sp.z, 1, 5) ?? { x: sp.x, z: sp.z, heading: 0 };
+  const road = world.nearestRoadPoint(sp.x, sp.z, 1, 7) ?? { x: sp.x, z: sp.z, heading: 0 };
   const fx = -Math.sin(road.heading), fz = -Math.cos(road.heading);
   bike.place(road.x, road.z, road.heading);
   harrier.place(road.x - fx * 12, road.z - fz * 12, road.heading);
   // player stands on the kerb side next to the bike, facing it
   player.place(road.x + fz * 1.6 + fx * 0.5, road.z - fx * 1.6 + fz * 0.5, road.heading - Math.PI / 2);
   camYaw = road.heading;
+  if (sp.board) {
+    // the board stands on the kerb just ahead of the bike, its face toward the rider
+    const board = signBoard(START.board);
+    board.position.set(road.x + fz * 2.6 + fx * 4, 0, road.z - fx * 2.6 + fz * 4);
+    board.rotation.y = road.heading;
+    scene.add(board);
+  }
+
+  setLoading(0.95, 'Waking up the streets…');
+  life = new Life(scene, world, mobile ? LIFE_MOBILE : LIFE_DESKTOP);
 
   setLoading(1, 'Ready');
   hideLoading();
   const hud = new Hud();
   loop(hud);
+}
+
+const playerBody: Body = { x: 0, z: 0, r: 0.4, kind: 'player', ref: player };
+const vehicleBodies = new Map<Vehicle, Body[]>();
+/** The player and both vehicles, as obstacles the traffic and people react to. */
+function actorBodies(): Body[] {
+  const out: Body[] = [];
+  if (!player.vehicle) {
+    playerBody.x = player.x;
+    playerBody.z = player.z;
+    out.push(playerBody);
+  }
+  for (const v of vehicles) {
+    let list = vehicleBodies.get(v);
+    if (!list) vehicleBodies.set(v, (list = v.spec.circles.map(() => ({ x: 0, z: 0, r: 0, kind: 'player' as const, ref: v }))));
+    v.circlesWorld().forEach((c, i) => Object.assign(list![i], c));
+    out.push(...list);
+  }
+  return out;
 }
 
 function nearestVehicle(): { v: Vehicle; d: number } | null {
@@ -132,6 +170,7 @@ function loop(hud: Hud) {
 
     const focus = player.vehicle ?? player;
     world.update(focus.x, focus.z, t);
+    life?.update(dt, focus.x, focus.z, actorBodies());
 
     // chase camera: swing back behind the vehicle unless the player is looking around
     const v = player.vehicle;
@@ -202,7 +241,14 @@ function loop(hud: Hud) {
 }
 
 // handy for testing from the console
-Object.assign(window, { game: { world, player, bike, harrier, camera } });
+Object.assign(window, {
+  game: {
+    world, player, bike, harrier, camera,
+    get life() { return life; },
+    get camYaw() { return camYaw; },
+    set camYaw(v: number) { camYaw = v; lastLook = performance.now() / 1000; },
+  },
+});
 
 start().catch((e) => {
   console.error(e);

@@ -373,6 +373,7 @@ function splitByTile(pts) {
 const flat = (pts) => pts.flatMap(([x, z]) => [r1(x), r1(z)]);
 
 let roadCount = 0;
+const roadLines = []; // drivable roads, for placing level-crossing gates
 for (const el of loadLayer('roads')) {
   const t = el.tags || {};
   const spec = ROAD[t.highway];
@@ -383,10 +384,11 @@ for (const el of loadLayer('roads')) {
   const bridge = t.bridge && t.bridge !== 'no' ? 1 : 0;
   if (spec[1] <= 4) strokeLine(pts, Math.max(w, PX), paint([118, 116, 112]));
   else if (bridge) strokeLine(pts, w, paint([120, 118, 114]));
+  if (spec[1] <= 7) roadLines.push({ pts, w });
   for (const run of splitByTile(pts)) {
     const r = { c: spec[1], w, p: flat(run.pts) };
     if (bridge) r.b = 1;
-    if (t.oneway === 'yes') r.o = 1;
+    if (t.oneway === 'yes' || t.junction === 'roundabout') r.o = 1;
     if (t.name) r.n = t.name;
     getTile(run.k).roads.push(r);
   }
@@ -396,12 +398,24 @@ console.log(`roads: ${roadCount}`);
 
 // ---------- rail ----------
 const stations = [];
+const mainLines = []; // running lines used by passenger trains
+const allTracks = [];
+const crossingNodes = [];
 for (const el of loadLayer('rail')) {
   const t = el.tags || {};
   if (el.type === 'node' && t.railway === 'station') {
     const [x, z] = proj(el.lat, el.lon);
     stations.push({ n: t['name:en'] || t.name || 'Station', mr: t['name:mr'] || undefined, x: r1(x), z: r1(z) });
     continue;
+  }
+  if (el.type === 'node' && t.railway === 'level_crossing') {
+    crossingNodes.push(proj(el.lat, el.lon));
+    continue;
+  }
+  if (el.type === 'way' && el.geometry && t.railway === 'rail') {
+    const g = geomOf(el.geometry);
+    allTracks.push(g);
+    if (!t.service && (t.usage === 'main' || !t.usage)) mainLines.push(g);
   }
   if (el.type !== 'way' || !el.geometry) continue;
   if (!['rail', 'light_rail', 'subway', 'narrow_gauge'].includes(t.railway)) {
@@ -417,6 +431,165 @@ for (const el of loadLayer('rail')) {
   for (const run of splitByTile(pts)) getTile(run.k).rail.push({ p: flat(run.pts), b: t.bridge && t.bridge !== 'no' ? 1 : undefined });
 }
 console.log(`stations: ${stations.map((s) => s.n).join(', ')}`);
+
+// ---------- train routes ----------
+// Build a graph of the running lines, then find paths between the places where the lines leave
+// the map (south, north, east). Each distinct path becomes a route trains shuttle along.
+const trainRoutes = [];
+{
+  const key = ([x, z]) => `${Math.round(x * 10)},${Math.round(z * 10)}`;
+  const verts = new Map(); // key -> { p, nb: Map<key, len> }
+  const vert = (p) => {
+    const k = key(p);
+    if (!verts.has(k)) verts.set(k, { p, nb: new Map() });
+    return k;
+  };
+  for (const line of mainLines) {
+    for (let i = 0; i < line.length - 1; i++) {
+      const a = vert(line[i]), b = vert(line[i + 1]);
+      if (a === b) continue;
+      const d = Math.hypot(line[i + 1][0] - line[i][0], line[i + 1][1] - line[i][1]);
+      verts.get(a).nb.set(b, d);
+      verts.get(b).nb.set(a, d);
+    }
+  }
+  const M = 800;
+  const side = ({ p: [x, z] }) => (z > maxZ - M ? 'S' : z < minZ + M ? 'N' : x > maxX - M ? 'E' : x < minX + M ? 'W' : null);
+  const ends = [...verts.entries()].filter(([, v]) => v.nb.size === 1 && side(v)).map(([k, v]) => ({ k, side: side(v) }));
+
+  function dijkstra(src) {
+    const dist = new Map([[src, 0]]), prev = new Map();
+    const heap = [[0, src]];
+    while (heap.length) {
+      // small graphs: a sorted array is plenty
+      heap.sort((a, b) => b[0] - a[0]);
+      const [d, u] = heap.pop();
+      if (d > dist.get(u)) continue;
+      for (const [w, len] of verts.get(u).nb) {
+        const nd = d + len;
+        if (nd < (dist.get(w) ?? Infinity)) { dist.set(w, nd); prev.set(w, u); heap.push([nd, w]); }
+      }
+    }
+    return { dist, prev };
+  }
+
+  const seen = new Set();
+  for (const a of ends) {
+    const { dist, prev } = dijkstra(a.k);
+    for (const b of ends) {
+      if (b.side === a.side || !dist.has(b.k)) continue;
+      const pair = [a.k, b.k].sort().join('|');
+      if (seen.has(pair)) continue;
+      seen.add(pair);
+      const path = [];
+      for (let k = b.k; k; k = prev.get(k)) path.push(verts.get(k).p);
+      path.reverse();
+      const len = dist.get(b.k);
+      if (len < 5000) continue;
+      trainRoutes.push({ sides: a.side + b.side, path, len });
+    }
+  }
+  for (const r of trainRoutes) {
+    // cumulative distance, then stations within 90 m of the line become stops
+    const cum = [0];
+    for (let i = 1; i < r.path.length; i++) cum.push(cum[i - 1] + Math.hypot(r.path[i][0] - r.path[i - 1][0], r.path[i][1] - r.path[i - 1][1]));
+    r.stops = [];
+    for (const st of stations) {
+      let best = Infinity, bs = 0;
+      for (let i = 0; i < r.path.length - 1; i++) {
+        const [ax, az] = r.path[i], [bx, bz] = r.path[i + 1];
+        const ex = bx - ax, ez = bz - az, l2 = ex * ex + ez * ez || 1;
+        const tt = Math.max(0, Math.min(1, ((st.x - ax) * ex + (st.z - az) * ez) / l2));
+        const d = Math.hypot(ax + ex * tt - st.x, az + ez * tt - st.z);
+        if (d < best) { best = d; bs = cum[i] + tt * Math.sqrt(l2); }
+      }
+      if (best < 90) r.stops.push({ s: Math.round(bs), n: st.n });
+    }
+    r.stops.sort((a, b) => a.s - b.s);
+  }
+  // Keep the services that actually run here: Western Railway locals (through Naigaon and Virar,
+  // one per track) and the Vasai Road - Diva branch (through Juichandra).
+  const has = (r, re) => r.stops.some((st) => re.test(st.n));
+  const wr = trainRoutes.filter((r) => has(r, /naigaon/i) && has(r, /virar/i) && !has(r, /juichandra/i));
+  const branch = trainRoutes.filter((r) => has(r, /juichandra/i) && has(r, /vasai/i) && !has(r, /naigaon/i)).sort((a, b) => a.len - b.len);
+  const picked = [];
+  for (const r of wr) {
+    // one route per physical track: skip routes that start next to an already picked one
+    if (picked.some((q) => Math.hypot(q.path[0][0] - r.path[0][0], q.path[0][1] - r.path[0][1]) < 3 ||
+      Math.hypot(q.path[0][0] - r.path.at(-1)[0], q.path[0][1] - r.path.at(-1)[1]) < 3)) continue;
+    r.kind = 'wr';
+    picked.push(r);
+    if (picked.length === 4) break;
+  }
+  if (branch[0]) { branch[0].kind = 'branch'; picked.push(branch[0]); }
+  trainRoutes.length = 0;
+  trainRoutes.push(...picked);
+  console.log(`train routes: ${trainRoutes.map((r) => `${r.kind} ${r.sides} ${(r.len / 1000).toFixed(1)}km [${r.stops.map((s) => s.n).join(', ')}]`).join('; ')}`);
+}
+
+// ---------- level crossings ----------
+// Cluster the per-track crossing nodes, then orient the gates along the road that crosses there.
+const crossings = [];
+{
+  const clusters = [];
+  for (const [x, z] of crossingNodes) {
+    const c = clusters.find((q) => Math.hypot(q.x - x, q.z - z) < 45);
+    if (c) { c.pts.push([x, z]); c.x = c.pts.reduce((s, p) => s + p[0], 0) / c.pts.length; c.z = c.pts.reduce((s, p) => s + p[1], 0) / c.pts.length; }
+    else clusters.push({ x, z, pts: [[x, z]] });
+  }
+  // direction of the nearest segment of a set of polylines
+  const nearestDir = (lines, x, z) => {
+    let best = Infinity, dir = null;
+    for (const pts of lines) {
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+        const ex = bx - ax, ez = bz - az, l2 = ex * ex + ez * ez || 1;
+        const tt = Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / l2));
+        const d = Math.hypot(ax + ex * tt - x, az + ez * tt - z);
+        if (d < best) { best = d; const l = Math.sqrt(l2); dir = [ex / l, ez / l]; }
+      }
+    }
+    return { best, dir };
+  };
+  for (const c of clusters) {
+    // only real road crossings get gates (not yard walkways)
+    if (nearestDir(roadLines.map((r) => r.pts), c.x, c.z).best > 15) continue;
+    const rail = nearestDir(allTracks, c.x, c.z).dir;
+    let dir = null;
+    // several tracks: the crossing nodes line up along the road
+    if (c.pts.length >= 2) {
+      let far = null, fd = 0;
+      for (const p of c.pts) for (const q of c.pts) {
+        const d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+        if (d > fd) { fd = d; far = [q[0] - p[0], q[1] - p[1]]; }
+      }
+      if (fd > 3) dir = [far[0] / fd, far[1] / fd];
+    }
+    // otherwise: of the roads within 15 m, the one that crosses the track most squarely
+    if (!dir) {
+      let bestScore = -Infinity;
+      for (const { pts } of roadLines) {
+        for (let i = 0; i < pts.length - 1; i++) {
+          const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+          const ex = bx - ax, ez = bz - az, l2 = ex * ex + ez * ez || 1;
+          const tt = Math.max(0, Math.min(1, ((c.x - ax) * ex + (c.z - az) * ez) / l2));
+          const d = Math.hypot(ax + ex * tt - c.x, az + ez * tt - c.z);
+          if (d > 15) continue;
+          const l = Math.sqrt(l2);
+          const cross = rail ? Math.abs((ex / l) * rail[1] - (ez / l) * rail[0]) : 1;
+          const score = cross * 10 - d;
+          if (score > bestScore) { bestScore = score; dir = [ex / l, ez / l]; }
+        }
+      }
+    }
+    if (!dir) continue;
+    // half the span of the tracks measured along the road, plus clearance
+    let span = 0;
+    for (const [x, z] of c.pts) span = Math.max(span, Math.abs((x - c.x) * dir[0] + (z - c.z) * dir[1]));
+    crossings.push({ x: r1(c.x), z: r1(c.z), dx: +dir[0].toFixed(3), dz: +dir[1].toFixed(3), h: r1(span + 4.5) });
+  }
+  console.log(`level crossings: ${crossings.length}`);
+}
 
 // ---------- buildings ----------
 const PASTEL = [
@@ -542,6 +715,8 @@ const world = {
   stations,
   places,
   spawn: { x: nsp.x, z: nsp.z, near: nsp.n },
+  trainRoutes: trainRoutes.map((r) => ({ kind: r.kind, len: Math.round(r.len), p: flat(r.path), stops: r.stops })),
+  crossings,
   attribution: '© OpenStreetMap contributors (ODbL)',
   fetchedAt: meta.fetched_at,
 };

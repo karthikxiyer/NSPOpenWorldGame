@@ -51,6 +51,25 @@ export interface NamedPoint {
   z: number;
 }
 
+export interface TrainRoute {
+  kind: 'wr' | 'branch';
+  len: number;
+  /** flat [x, z, ...] */
+  p: number[];
+  /** distance along the route of each station stop */
+  stops: { s: number; n: string }[];
+}
+
+export interface Crossing {
+  x: number;
+  z: number;
+  /** direction of the road through the crossing */
+  dx: number;
+  dz: number;
+  /** half-width of the tracks measured along the road, plus clearance */
+  h: number;
+}
+
 export interface WorldIndex {
   origin: { lat: number; lon: number };
   scale: { kx: number; kz: number };
@@ -61,6 +80,8 @@ export interface WorldIndex {
   stations: NamedPoint[];
   places: NamedPoint[];
   spawn: { x: number; z: number; near: string };
+  trainRoutes: TrainRoute[];
+  crossings: Crossing[];
   attribution: string;
   fetchedAt: string;
 }
