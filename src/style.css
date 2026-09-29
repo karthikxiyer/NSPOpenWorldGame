@@ -79,6 +79,22 @@ html, body {
   cursor: pointer;
 }
 
+#mute-btn {
+  pointer-events: auto;
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: 60px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--paper);
+  font-size: 16px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+.tbtn[hidden] { display: none; }
+
 #attrib {
   pointer-events: auto;
   position: absolute;

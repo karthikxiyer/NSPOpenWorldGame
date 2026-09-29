@@ -47,6 +47,8 @@ export class Trains {
   private cab: InstanceWriter;
   /** coach centres and directions this frame, for collision */
   private placed: { x: number; z: number; ux: number; uz: number }[] = [];
+  /** things worth hearing since the last drain: a train coming in, a train stopping */
+  readonly events: { kind: 'enter' | 'stop'; x: number; z: number }[] = [];
 
   constructor(scene: THREE.Scene, patch: Patch, shadows: boolean, private wrap: Wrap, private rand: () => number) {
     const st = patch.stations[0];
@@ -98,6 +100,7 @@ export class Trains {
   }
 
   private enter(t: Train) {
+    this.events.push({ kind: 'enter', x: t.route.xs[t.route.dir === 1 ? 0 : t.route.xs.length - 1], z: t.route.zs[t.route.dir === 1 ? 0 : t.route.zs.length - 1] });
     t.running = true;
     t.stopped = false;
     t.dwell = 0;
@@ -168,6 +171,9 @@ export class Trains {
         t.stopped = true;
         t.v = 0;
         t.dwell = DWELL;
+        const p = { x: 0, z: 0 };
+        this.at(r, t.s, p);
+        this.events.push({ kind: 'stop', ...p });
         return;
       }
       limit = Math.min(limit, Math.sqrt(2 * DECEL * Math.max(0, togo - 0.2)) + 0.3);
@@ -198,6 +204,22 @@ export class Trains {
     this.coach.end();
     this.motor.end();
     this.cab.end();
+  }
+
+  /** The coach nearest a point, and how fast its train is going (for the rumble). */
+  nearest(x: number, z: number): { d: number; v: number; x: number; z: number } | null {
+    const w = this.wrap;
+    let best: { d: number; v: number; x: number; z: number } | null = null;
+    let k = 0;
+    for (const t of this.trains) {
+      if (!t.running) continue;
+      for (let i = 0; i < COACHES; i++) {
+        const c = this.placed[k++];
+        const d = w.dist(c.x, c.z, x, z);
+        if (!best || d < best.d) best = { d, v: t.dwell > 0 ? 0 : t.v, x: c.x, z: c.z };
+      }
+    }
+    return best;
   }
 
   /** Is a train standing at the platform? (for the HUD) */

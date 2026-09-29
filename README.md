@@ -14,6 +14,36 @@ beside the black 10,000-litre water tank, next to your black-and-yellow **Honda 
   miniature while positions stay true.
 - **No edges.** Ride off one side and you come back in from the other. A ring road (the one
   invented street) runs along the patch edges so the wrap is seamless.
+- **Real places.** Shops, clinics, hospitals, the bank, temples, the cinema and parks mapped in
+  OSM carry their real names on signboards (with Marathi where known); named buildings show their
+  society name; named streets get blue boards at their ends. Walk past one and the HUD names it.
+- **Station Road bazaar.** Ground floors facing Station Road, ST Depot Road and the other market
+  streets are rows of shops — open counters or shutters, awnings, bilingual boards. These shop
+  names are generated (typical Nalasopara names), not real businesses.
+- **Nalla Sopara station and the ST Depot.** A booking office at the end of Depot Road, numbered
+  platforms, footbridges with stairs down to the platforms; the MSRTC stand with its canopy,
+  red buses in the bays and the yard's workshop behind.
+- **A living town.** Autos, cars, scooters, tempos and buses drive the real road network — keeping
+  left, obeying one-way streets, slowing for corners and queueing behind whatever's ahead (you
+  included). People walk the pavements and crowd round shops, the station and the depot; cows lie
+  in the road and won't budge, dogs and goats scatter. Western Line locals run the four main
+  lines, stop at Nalla Sopara with commuters waiting on the platforms, and roll on.
+- **Hail an auto.** Press G (or AUTO) by a road and the nearest auto-rickshaw pulls in beside you.
+  Get in, pick where to go — the station, the ST Depot, the Taaki, the Station Road market, the
+  cinema — and it drives you there by the shortest route, meter running at Mumbai auto fares.
+- **Engines you can hear.** The CB350RS is a 348 cc long-stroke single: at idle it thumps about
+  nine times a second, it pulls through five gears and pops on the overrun. The Harrier's 2.0
+  Kryotec diesel clatters at idle, and its turbo whistles as it spools up through six gears. Both
+  crank on the starter when you get on, with tyre roar, wind and skids on top. Autos putter,
+  scooters buzz, buses and tempos grumble past.
+- **The street.** Horns (more when traffic's stuck), a crowd murmur where it's busy, crows, dogs
+  barking, locals rumbling and clattering over the rail joints, their horns, and the station's
+  chime when one pulls in.
+- **Gulmohar in bloom.** Petals drift down from the flame trees and settle under them, and
+  anything fast kicks them back up.
+
+OpenStreetMap is incomplete here: some blocks have fewer buildings than in reality, and most
+building heights are estimated.
 
 ## Running
 
@@ -24,7 +54,13 @@ npm run build     # map patch + typecheck + production bundle in dist/
 ```
 
 URL parameters: `?play=ride` / `?play=walk` skip the title, `?lite` forces the phone-quality
-renderer (no shadow maps or supersampling), `?debug` logs FPS and draw calls.
+renderer (no shadow maps or supersampling), `?debug` logs FPS, draw calls and render-quality
+changes.
+
+On phones the game renders at 1× with no shadow maps, keeps fewer people and vehicles alive,
+draws a little less far, and a frame-rate governor lowers the render resolution if the phone
+can't keep up (and raises it again when it can). Collisions buzz the phone; sound pauses in a
+background tab.
 
 ## Controls
 
@@ -35,8 +71,10 @@ renderer (no shadow maps or supersampling), `?debug` logs FPS and draw calls.
 | Get on / off | E | A | E |
 | Call your vehicle | V | B | CALL |
 | Hail an auto | G | RB | AUTO |
+| Horn | Q | LB | HORN |
 | Look around | Drag mouse | Right stick | Drag right side |
 | Camera distance | C | Y | – |
+| Sound on / off | M | – | 🔊 |
 | Hide hints | H | – | – |
 
 ## How it's built
@@ -48,44 +86,28 @@ renderer (no shadow maps or supersampling), `?debug` logs FPS and draw calls.
   stand; `src/world/places.ts` draws them, with every sign face in one canvas atlas.
 - `src/world/curve.ts` bends everything in the vertex shader around the player. A small radius
   makes the title planet; a large one the gentle horizon. Animating it is the unroll.
+- The map is split into 200 m chunks; each frame every chunk moves to its copy nearest the player,
+  which is what makes the edges wrap.
 - `src/life/` runs everything alive in folded patch coordinates: a road graph stitched across the
   wrap, instanced cel-shaded models drawn at the copy nearest you, and A* for the auto's route.
   Nothing is kept alive beyond ~190 m, and new arrivals appear behind the camera or over the curve's
   horizon, never in view.
-- The map is split into 200 m chunks; each frame every chunk moves to its copy nearest the player,
-  which is what makes the edges wrap.
+- `src/audio/` synthesises every sound — there are no samples. Engines run in an AudioWorklet
+  (`worklet.ts`): each cylinder fires one exhaust pulse per 720° cycle at its point in the firing
+  order, with cycle-to-cycle variation, into a waveguide model of the exhaust pipe; diesels add
+  combustion knock, the turbo a boost-driven whistle. `Engine.ts` has the per-vehicle tuning and a
+  gearbox (throttle-dependent shift points, clutch slip pulling away, holding the gear on the
+  overrun). `Ambience.ts` gives the nearest traffic their own engine voices, panned by bearing.
 - **The look** — cel shading with violet-shifted shadows, screen-space ink from the depth buffer,
   a split-tone grade, FXAA, hero outlines and a painted sky — is adapted from
   [Sakura Crossing](https://github.com/Kenton-GMI/sakura-crossing) (MIT). See
   `THIRD_PARTY_NOTICES.md`.
-
-- **Real places.** Shops, clinics, hospitals, the bank, temples, the cinema and parks mapped in
-  OSM carry their real names on signboards (with Marathi where known); named buildings show their
-  society name; named streets get blue boards at their ends. Walk past one and the HUD names it.
-- **Station Road bazaar.** Ground floors facing Station Road, ST Depot Road and the other market
-  streets are rows of shops — open counters or shutters, awnings, bilingual boards. These shop
-  names are generated (typical Nalasopara names), not real businesses.
-- **Nalla Sopara station and the ST Depot.** A booking office at the end of Depot Road, numbered
-  platforms, footbridges with stairs down to the platforms; the MSRTC stand with its canopy,
-  red buses in the bays and the yard's workshop behind.
-
-- **A living town.** Autos, cars, scooters, tempos and buses drive the real road network — keeping
-  left, obeying one-way streets, slowing for corners and queueing behind whatever's ahead (you
-  included). People walk the pavements and crowd round shops, the station and the depot; cows lie
-  in the road and won't budge, dogs and goats scatter. Western Line locals run the four main
-  lines, stop at Nalla Sopara with commuters waiting on the platforms, and roll on.
-- **Hail an auto.** Press G (or AUTO) by a road and the nearest auto-rickshaw pulls in beside you.
-  Get in, pick where to go — the station, the ST Depot, the Taaki, the Station Road market, the
-  cinema — and it drives you there by the shortest route, meter running at Mumbai auto fares.
-
-OpenStreetMap is incomplete here: some blocks have fewer buildings than in reality, and most
-building heights are estimated.
 
 ## Roadmap
 
 1. ✅ Real map, title planet and unroll, curved horizon, wrap-around, the tank, vehicles
 2. ✅ Real places detailed: signboards from OSM names, the station, the ST Depot, Station Road shops
 3. ✅ Life: traffic on the real road network, pedestrians, animals, Western Line locals, hailing an auto
-4. Polish: gulmohar petals, street ambience, phone tuning
+4. ✅ Polish: gulmohar petals, street ambience, engine sound, phone tuning
 
 Map data © OpenStreetMap contributors (ODbL).

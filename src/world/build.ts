@@ -351,6 +351,14 @@ function tree(b: Batch, rng: Rng, x: number, z: number, kind: number) {
     const a = rng.range(0, Math.PI * 2), d = i === 0 ? 0 : rng.range(0.7, spread), r = rng.range(1.4, 2.1);
     b.stamp(TPL.crown, mat(x + Math.cos(a) * d, trunkH + 0.9 + rng.range(0, 0.8), z + Math.sin(a) * d, rng.range(0, 3), rng.range(0, 3), 0, r, r * (gul ? 0.55 : 0.85), r), rng.pick(colors));
   }
+  // fallen gulmohar petals carpet the ground under the tree
+  if (gul) {
+    for (let i = 0; i < 14; i++) {
+      const a = rng.range(0, Math.PI * 2), d = Math.sqrt(rng.next()) * 2.8, px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
+      const s = rng.range(0.05, 0.09), r = rng.range(0, 3), c = Math.cos(r) * s, sn = Math.sin(r) * s;
+      b.quad([px - c + sn, 0.035, pz - sn - c], [px + c + sn, 0.035, pz + sn - c], [px + c - sn, 0.035, pz + sn + c], [px - c - sn, 0.035, pz - sn + c], UP, rng.pick([PAL.petal, PAL.gulmohar, PAL.gulmoharDeep]));
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------------------------

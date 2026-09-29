@@ -25,7 +25,7 @@ const SPECIES: Species[] = [
   { name: 'goat', geo: goat, weight: 0.15, walk: 0.9, run: 3, r: 0.4, lie: 0.2, skittish: true, colors: ['#f4f1ea', '#2e2a26', '#7a5a3e', '#d8c8a8'] },
 ];
 
-interface Animal {
+export interface Animal {
   sp: Species;
   x: number;
   z: number;
@@ -40,7 +40,7 @@ interface Animal {
 }
 
 export class Animals {
-  private animals: Animal[] = [];
+  animals: Animal[] = [];
   private writers: InstanceWriter[][];
   private spawnTimer = 0;
 

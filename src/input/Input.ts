@@ -100,6 +100,10 @@ export class Input {
       e.preventDefault();
       this.pressed.add('KeyV');
     });
+    document.getElementById('btn-horn')!.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.pressed.add('KeyQ');
+    });
     document.getElementById('btn-hail')!.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       this.pressed.add('KeyG');
@@ -171,6 +175,7 @@ export class Input {
       if (now[3] && !this.padPrev[3]) this.pressed.add('KeyC');
       if (now[1] && !this.padPrev[1]) this.pressed.add('KeyV');
       if (now[5] && !this.padPrev[5]) this.pressed.add('KeyG');
+      if (now[4] && !this.padPrev[4]) this.pressed.add('KeyQ');
       if (now[12] && !this.padPrev[12]) this.pressed.add('PadUp');
       if (now[13] && !this.padPrev[13]) this.pressed.add('PadDown');
       if (now[9] && !this.padPrev[9]) this.pressed.add('Escape');

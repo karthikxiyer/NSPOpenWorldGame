@@ -8,6 +8,9 @@ import { Pipeline } from './core/post';
 import { Sky } from './core/sky';
 import { Player } from './entities/Player';
 import { CB350RS, HARRIER, Vehicle } from './entities/Vehicle';
+import { Ambience } from './audio/Ambience';
+import { VehicleSound } from './audio/Engine';
+import { Sound } from './audio/Sound';
 import { LIFE_DESKTOP, LIFE_MOBILE } from './config';
 import { Input } from './input/Input';
 import { autoFare, Life } from './life/Life';
@@ -17,6 +20,7 @@ import { Hud, hideLoading, setLoading, showError } from './ui/Hud';
 import { buildWorld } from './world/build';
 import { CURVE, curvePoint, curveTree } from './world/curve';
 import { loadPatch, type Patch } from './world/patch';
+import { Petals } from './world/Petals';
 import { Terrain } from './world/Terrain';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -29,9 +33,10 @@ const lite = input.isTouch || params.has('lite');
 /** tiny planet on the title screen, gentle horizon in play */
 const R_TITLE = 380;
 const R_PLAY = 900;
-const VIEW_RANGE = 380; // beyond this the curve has dropped everything below the horizon
+// beyond this the curve has dropped everything below the horizon; phones draw a little less
+const VIEW_RANGE = lite ? 320 : 380;
 const INTRO_SECONDS = 3.2;
-const FOG_PLAY: [number, number] = [90, 420];
+const FOG_PLAY: [number, number] = lite ? [80, 360] : [90, 420];
 
 // ---------- renderer, scene, lights ----------
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
@@ -179,6 +184,46 @@ async function start() {
   sky.setClouds(false);
   setLoading(0.9, 'Waking up the streets…');
   const life = new Life(scene, patch, terrain, lite ? LIFE_MOBILE : LIFE_DESKTOP, !lite);
+  const petals = new Petals(scene, patch, lite ? 140 : 360, life.wrap);
+
+  // ---- sound: browsers only allow it after a tap or key press ----
+  let sound: Sound | null = null;
+  let amb: Ambience | null = null;
+  const engines = new Map<Vehicle, VehicleSound>();
+  let engineOn: Vehicle | null = null;
+  const muteBtn = document.getElementById('mute-btn')!;
+  let muted = false;
+  try { muted = localStorage.getItem('nsp.muted') === '1'; } catch { /* private mode */ }
+  const showMute = () => { muteBtn.textContent = muted ? '🔇' : '🔊'; muteBtn.title = muted ? 'Sound off (M)' : 'Sound on (M)'; };
+  showMute();
+  const startAudio = () => {
+    if (sound) { if (!muted) sound.resume(); return; }
+    const s = new Sound();
+    sound = s;
+    void s.init().then(() => {
+      for (const v of vehicles) engines.set(v, new VehicleSound(s, v.spec.kind));
+      amb = new Ambience(s, life, lite ? 3 : 5);
+      engineOn = null; // the engine of whatever you're on starts in the next frame
+    });
+    if (muted) s.setMuted(true);
+    else s.resume();
+  };
+  addEventListener('pointerdown', startAudio, true);
+  addEventListener('keydown', startAudio, true);
+  const toggleMute = () => {
+    muted = !muted;
+    try { localStorage.setItem('nsp.muted', muted ? '1' : '0'); } catch { /* private mode */ }
+    showMute();
+    if (sound) sound.setMuted(muted);
+    else startAudio();
+  };
+  muteBtn.addEventListener('click', toggleMute);
+  // no sound in a background tab
+  document.addEventListener('visibilitychange', () => {
+    if (!sound) return;
+    if (document.hidden) void sound.ctx.suspend();
+    else if (!muted) sound.resume();
+  });
 
   // spawn: the bike on the road beside the tank, the Harrier behind it, you between bike and tank
   const sp = patch.spawn;
@@ -273,7 +318,8 @@ async function start() {
 
   const vy = new Map<Vehicle, number>();
   const clock = new THREE.Clock();
-  let orbit = 0.6, areaTimer = 0, frames = 0, fpsT = 0;
+  let orbit = 0.6, areaTimer = 0, frames = 0, fpsT = 0, lastImpact = 0;
+  const hornBtn = document.getElementById('btn-horn')!;
 
   let simT = 0;
   /** one step of the game; `draw` is false for the fast-forward steps of game.advance() */
@@ -326,8 +372,10 @@ async function start() {
       }
       if (input.consume('KeyC')) camDistScale = camDistScale === 1 ? 1.6 : camDistScale === 1.6 ? 0.7 : 1;
       if (input.consume('KeyH')) hud?.toggleHint();
+      if (input.consume('KeyQ') && inVehicle) engines.get(inVehicle)?.horn();
     }
     if (playing) {
+      if (input.consume('KeyM')) toggleMute();
       if (inp.lookX || inp.lookY) {
         camYaw -= inp.lookX;
         camPitch = THREE.MathUtils.clamp(camPitch + inp.lookY, -0.05, 1.2);
@@ -370,6 +418,29 @@ async function start() {
     life.update(dt, focus.x, focus.z, actorBodies(), camYaw);
     if (playing) autoRide();
     life.render(focus.x, focus.z);
+    const mover = player.vehicle ?? riding;
+    petals.update(dt, focus.x, focus.z, mover ? { x: mover.x, z: mover.z, speed: Math.abs(mover.speed) } : null);
+    petals.render(focus.x, focus.z);
+
+    // ---- sound ----
+    if (engines.size && engineOn !== player.vehicle) {
+      // the starter cranks when you get on; the engine dies away when you get off
+      if (engineOn) engines.get(engineOn)?.stop();
+      if (player.vehicle) engines.get(player.vehicle)?.start();
+      engineOn = player.vehicle;
+    }
+    const rx = Math.cos(camYaw), rz = -Math.sin(camYaw);
+    for (const [veh, es] of engines) {
+      const driven = playing && veh === player.vehicle;
+      const ex = life.wrap.dx(camFlat.x, veh.x), ez = life.wrap.dz(camFlat.z, veh.z), ed = Math.hypot(ex, ez) || 1;
+      es.update(dt, veh, driven ? inp.throttle : 0, driven ? inp.brake : 0, driven && inp.alt, ed, ((ex * rx + ez * rz) / ed) * 0.5);
+    }
+    const es = player.vehicle ? engines.get(player.vehicle) : undefined;
+    amb?.update(dt, focus.x, focus.z, camYaw, es ? Math.min(1, es.rpm / 4000) : 0);
+    // a jolt through the phone when you hit something
+    const hit = player.vehicle?.impact ?? 0;
+    if (hit > 0.25 && lastImpact <= 0.25 && input.isTouch && navigator.vibrate) navigator.vibrate(Math.round(20 + 60 * hit));
+    lastImpact = hit;
 
     // ---- place actors at their copy nearest the focus ----
     const near = (x: number, z: number): [number, number] => [
@@ -476,6 +547,7 @@ async function start() {
         hud.setArea(a.n, a.mr);
       }
       const myAuto = life.ride;
+      hornBtn.hidden = !v;
       if (riding) {
         hud.setDriving('Auto rickshaw', riding.speed * 3.6);
         hud.setPrompt(riding.job === 'hired' ? `Meter ₹${autoFare(riding.odo)}` : null);
@@ -513,8 +585,29 @@ async function start() {
       }
     }
   };
+  // frame-rate governor: on a device that can't keep up, render fewer pixels (and more again when it can)
+  let perfT = 0, perfN = 0, perfSum = 0, goodT = 0;
+  const govern = (raw: number) => {
+    if (mode !== 'play' || document.hidden || raw > 0.25) return;
+    perfSum += raw;
+    perfN++;
+    perfT += raw;
+    if (perfT < 2) return;
+    const avg = perfSum / perfN;
+    perfT = perfSum = perfN = 0;
+    const before = pipeline.quality;
+    if (avg > (lite ? 1 / 38 : 1 / 50)) { pipeline.setQuality(before - 0.1); goodT = 0; }
+    else if (avg < 1 / 57) { goodT += 2; if (goodT >= 8) { pipeline.setQuality(before + 0.05); goodT = 0; } }
+    else goodT = 0;
+    if (pipeline.quality !== before) {
+      setOutlineResolution(pipeline.size.x, pipeline.size.y);
+      if (debug) console.log(`render quality ${pipeline.quality.toFixed(2)} (frame ${(avg * 1000).toFixed(1)} ms)`);
+    }
+  };
   const frameFn = () => {
-    tick(Math.max(1e-4, Math.min(clock.getDelta(), 1 / 20)), true);
+    const raw = clock.getDelta();
+    govern(raw);
+    tick(Math.max(1e-4, Math.min(raw, 1 / 20)), true);
     requestAnimationFrame(frameFn);
   };
   requestAnimationFrame(frameFn);
@@ -523,7 +616,7 @@ async function start() {
     for (let k = Math.ceil(seconds / dt); k > 0; k--) tick(dt, k === 1);
   };
 
-  Object.assign(window, { game: { advance, scene, life, patch, terrain, player, bike, harrier, camera, CURVE, get mode() { return mode; }, begin,
+  Object.assign(window, { game: { advance, get sound() { return sound; }, engines, petals, pipeline, scene, life, patch, terrain, player, bike, harrier, camera, CURVE, get mode() { return mode; }, begin,
     get camYaw() { return camYaw; }, set camYaw(v: number) { camYaw = v; lastLook = simT; } } });
 }
 

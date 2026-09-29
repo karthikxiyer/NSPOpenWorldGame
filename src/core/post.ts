@@ -154,10 +154,23 @@ export class Pipeline {
     this.fxaa = quad({ tDiffuse: { value: null }, uTexel: { value: new THREE.Vector2() } }, FXAA_FRAG);
   }
 
+  /** 0.5..1: lowered by the frame-rate governor on slow devices (it multiplies the render scale) */
+  quality = 1;
+  private lastW = 1;
+  private lastH = 1;
+
+  setQuality(q: number): void {
+    this.quality = Math.max(0.5, Math.min(1, q));
+    this.setSize(this.lastW, this.lastH);
+  }
+
   setSize(w: number, h: number): void {
+    this.lastW = w;
+    this.lastH = h;
     const dpr = window.devicePixelRatio || 1;
     let scale = this.opts.lite ? Math.min(dpr, 1) : dpr < 1.5 ? 1.5 : Math.min(dpr, 2);
     if (w * h * scale * scale > this.pixelBudget) scale = Math.max(this.opts.lite ? 0.75 : 1, Math.sqrt(this.pixelBudget / (w * h)));
+    scale *= this.quality;
     this.scale = scale;
     const rw = Math.max(2, Math.floor(w * scale)), rh = Math.max(2, Math.floor(h * scale));
     this.size.set(rw, rh);
