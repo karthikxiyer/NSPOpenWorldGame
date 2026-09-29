@@ -7,8 +7,9 @@ export interface LifeBudget {
   cars: number;
   pedestrians: number;
   animals: number;
+  /** how far from you things are kept alive (m); the curve hides a car beyond ~130 m */
+  radius: number;
 }
 
-// Used by traffic, people and animals (milestone 3).
-export const LIFE_DESKTOP: LifeBudget = { cars: 18, pedestrians: 40, animals: 12 };
-export const LIFE_MOBILE: LifeBudget = { cars: 10, pedestrians: 20, animals: 8 };
+export const LIFE_DESKTOP: LifeBudget = { cars: 40, pedestrians: 80, animals: 16, radius: 190 };
+export const LIFE_MOBILE: LifeBudget = { cars: 22, pedestrians: 40, animals: 10, radius: 170 };

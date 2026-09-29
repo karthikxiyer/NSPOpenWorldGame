@@ -41,6 +41,8 @@ export class Terrain {
   private cells = new Map<number, Footprint[]>();
   private circles = new Map<number, { x: number; z: number; r: number }[]>();
   private alpha: Uint8Array;
+  /** moving obstacles (traffic, trains, cows), in folded coordinates; set by the life system */
+  dynamic: ((x: number, z: number, r: number) => PushResult | null) | null = null;
 
   constructor(private patch: Patch, groundImg: HTMLImageElement) {
     const b = patch.bounds;
@@ -109,7 +111,7 @@ export class Terrain {
     return 0;
   }
 
-  collide(x: number, z: number, r: number, vehicle = false): PushResult {
+  collide(x: number, z: number, r: number, vehicle = false, dynamic = true): PushResult {
     const [wx, wz] = this.wrap(x, z);
     const res: PushResult = { x: wx, z: wz, hit: false, nx: 0, nz: 0 };
     const cand = new Set<Footprint>();
@@ -155,6 +157,14 @@ export class Terrain {
         res.hit = moved = true;
       }
       if (!moved) break;
+    }
+    if (dynamic && this.dynamic) {
+      for (let iter = 0; iter < 2; iter++) {
+        const d = this.dynamic(res.x, res.z, r);
+        if (!d) break;
+        res.x = d.x; res.z = d.z; res.nx = d.nx; res.nz = d.nz;
+        res.hit = true;
+      }
     }
     // back to the caller's (unfolded) coordinates
     res.x += x - wx;

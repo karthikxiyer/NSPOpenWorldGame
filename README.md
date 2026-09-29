@@ -34,6 +34,7 @@ renderer (no shadow maps or supersampling), `?debug` logs FPS and draw calls.
 | Run / brake | Shift / Space | X | RUN / BRAKE |
 | Get on / off | E | A | E |
 | Call your vehicle | V | B | CALL |
+| Hail an auto | G | RB | AUTO |
 | Look around | Drag mouse | Right stick | Drag right side |
 | Camera distance | C | Y | – |
 | Hide hints | H | – | – |
@@ -47,6 +48,10 @@ renderer (no shadow maps or supersampling), `?debug` logs FPS and draw calls.
   stand; `src/world/places.ts` draws them, with every sign face in one canvas atlas.
 - `src/world/curve.ts` bends everything in the vertex shader around the player. A small radius
   makes the title planet; a large one the gentle horizon. Animating it is the unroll.
+- `src/life/` runs everything alive in folded patch coordinates: a road graph stitched across the
+  wrap, instanced cel-shaded models drawn at the copy nearest you, and A* for the auto's route.
+  Nothing is kept alive beyond ~190 m, and new arrivals appear behind the camera or over the curve's
+  horizon, never in view.
 - The map is split into 200 m chunks; each frame every chunk moves to its copy nearest the player,
   which is what makes the edges wrap.
 - **The look** — cel shading with violet-shifted shadows, screen-space ink from the depth buffer,
@@ -64,6 +69,15 @@ renderer (no shadow maps or supersampling), `?debug` logs FPS and draw calls.
   platforms, footbridges with stairs down to the platforms; the MSRTC stand with its canopy,
   red buses in the bays and the yard's workshop behind.
 
+- **A living town.** Autos, cars, scooters, tempos and buses drive the real road network — keeping
+  left, obeying one-way streets, slowing for corners and queueing behind whatever's ahead (you
+  included). People walk the pavements and crowd round shops, the station and the depot; cows lie
+  in the road and won't budge, dogs and goats scatter. Western Line locals run the four main
+  lines, stop at Nalla Sopara with commuters waiting on the platforms, and roll on.
+- **Hail an auto.** Press G (or AUTO) by a road and the nearest auto-rickshaw pulls in beside you.
+  Get in, pick where to go — the station, the ST Depot, the Taaki, the Station Road market, the
+  cinema — and it drives you there by the shortest route, meter running at Mumbai auto fares.
+
 OpenStreetMap is incomplete here: some blocks have fewer buildings than in reality, and most
 building heights are estimated.
 
@@ -71,7 +85,7 @@ building heights are estimated.
 
 1. ✅ Real map, title planet and unroll, curved horizon, wrap-around, the tank, vehicles
 2. ✅ Real places detailed: signboards from OSM names, the station, the ST Depot, Station Road shops
-3. Life: traffic on the real road network, pedestrians, animals, Western Line locals, hailing an auto
+3. ✅ Life: traffic on the real road network, pedestrians, animals, Western Line locals, hailing an auto
 4. Polish: gulmohar petals, street ambience, phone tuning
 
 Map data © OpenStreetMap contributors (ODbL).

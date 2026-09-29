@@ -8,7 +8,11 @@ import { Pipeline } from './core/post';
 import { Sky } from './core/sky';
 import { Player } from './entities/Player';
 import { CB350RS, HARRIER, Vehicle } from './entities/Vehicle';
+import { LIFE_DESKTOP, LIFE_MOBILE } from './config';
 import { Input } from './input/Input';
+import { autoFare, Life } from './life/Life';
+import type { Body } from './life/Spatial';
+import type { Car } from './life/Traffic';
 import { Hud, hideLoading, setLoading, showError } from './ui/Hud';
 import { buildWorld } from './world/build';
 import { CURVE, curvePoint, curveTree } from './world/curve';
@@ -85,6 +89,29 @@ for (const root of [player.model.root, bike.model.root, harrier.model.root]) {
 }
 let lastVehicle: Vehicle = bike;
 
+// the auto you hailed, while you're sitting in it
+let riding: Car | null = null;
+const AUTO_CAM = { dist: 5.6, height: 2.1, look: 1.5 };
+
+const playerBody: Body = { x: 0, z: 0, r: 0.4, kind: 'player', ref: player };
+const vehicleBodies = new Map<Vehicle, Body[]>();
+/** You and your vehicles, as obstacles traffic and people react to. */
+function actorBodies(): Body[] {
+  const out: Body[] = [];
+  if (!player.vehicle && !riding) {
+    playerBody.x = player.x;
+    playerBody.z = player.z;
+    out.push(playerBody);
+  }
+  for (const v of vehicles) {
+    let list = vehicleBodies.get(v);
+    if (!list) vehicleBodies.set(v, (list = v.spec.circles.map(() => ({ x: 0, z: 0, r: 0, kind: 'player' as const, ref: v }))));
+    v.circlesWorld().forEach((c, i) => Object.assign(list![i], c));
+    out.push(...list);
+  }
+  return out;
+}
+
 type Mode = 'title' | 'intro' | 'play';
 let mode: Mode = 'title';
 
@@ -150,6 +177,8 @@ async function start() {
   if (debug) console.log(`world built in ${Math.round(performance.now() - t0)} ms`);
   const sky = new Sky(scene);
   sky.setClouds(false);
+  setLoading(0.9, 'Waking up the streets…');
+  const life = new Life(scene, patch, terrain, lite ? LIFE_MOBILE : LIFE_DESKTOP, !lite);
 
   // spawn: the bike on the road beside the tank, the Harrier behind it, you between bike and tank
   const sp = patch.spawn;
@@ -189,30 +218,104 @@ async function start() {
   });
   if (params.has('play')) begin(params.get('play') !== 'walk');
 
-  const hintFoot = input.isTouch ? 'Left stick to walk · E to get on · CALL brings your ride · drag to look' : 'WASD walk · Shift run · E get on · V call your ride · C camera · drag to look · H hide';
+  const hintFoot = input.isTouch ? 'Left stick to walk · E to get on · CALL brings your ride · AUTO hails an auto · drag to look' : 'WASD walk · Shift run · E get on · V call your ride · G hail an auto · C camera · drag to look · H hide';
+  const hintAuto = input.isTouch ? 'Sit back · tap E to get off here' : 'Sit back · E to get off here · drag to look';
   const hintRide = input.isTouch ? 'Push up to go, down to brake · E to get off when stopped' : 'W/S throttle & brake · A/D steer · Space brake · E get off when stopped';
+  // ---- the auto ----
+  const boardAuto = (a: Car) => {
+    riding = a;
+    player.model.root.visible = false;
+    camYaw = a.heading;
+    const here = life.destinations.filter((d) => life.wrap.dist(d.x, d.z, player.x, player.z) > 90);
+    menu = here;
+    hud?.showDestinations(here.map((d) => {
+      const km = life.wrap.dist(d.x, d.z, player.x, player.z) / 1000;
+      return { n: d.n, sub: `~${km.toFixed(1)} km` };
+    }), pickDestination);
+  };
+  let menu: typeof life.destinations = [];
+  const pickDestination = (i: number) => {
+    const d = menu[i];
+    if (!d || !riding) return;
+    hud?.hideDestinations();
+    if (life.go(riding, d)) hud?.toast(`Chalo, ${d.n}!`);
+    else { hud?.toast("The driver shakes his head — can't get there"); leaveAuto(false); }
+  };
+  /** Step out on the kerb side; pay if the meter ran. */
+  const leaveAuto = (paid: boolean) => {
+    const a = riding;
+    if (!a) return;
+    hud?.hideDestinations();
+    const fx = -Math.sin(a.heading), fz = -Math.cos(a.heading);
+    let ex = a.x + fz * 1.5, ez = a.z - fx * 1.5;
+    if (terrain.collide(ex, ez, 0.35, false, false).hit) { ex = a.x - fz * 1.5; ez = a.z + fx * 1.5; }
+    player.place(ex, ez, a.heading);
+    player.model.root.visible = true;
+    if (paid) hud?.toast(`Paid ₹${autoFare(a.odo)} · Dhanyavaad!`, 4);
+    riding = null;
+    life.release(a);
+  };
+  const autoRide = () => {
+    const a = life.ride;
+    if (riding) {
+      if (hud?.destinationsOpen) riding.timer = 45; // the driver waits while you decide
+      if (riding.job === 'arrived' && riding.speed < 0.4) leaveAuto(true);
+      return;
+    }
+    // a waiting auto gives up if you wander off or ride away
+    if (a && a.job === 'waiting') {
+      if (a.timer <= 0 || life.wrap.dist(a.x, a.z, player.x, player.z) > 80 || player.vehicle) {
+        life.release(a);
+        hud?.toast('The auto driver gave up and left');
+      }
+    }
+  };
+
   const vy = new Map<Vehicle, number>();
   const clock = new THREE.Clock();
   let orbit = 0.6, areaTimer = 0, frames = 0, fpsT = 0;
 
-  const frameFn = () => {
-    const dt = Math.max(1e-4, Math.min(clock.getDelta(), 1 / 20));
-    const t = clock.elapsedTime;
+  let simT = 0;
+  /** one step of the game; `draw` is false for the fast-forward steps of game.advance() */
+  const tick = (dt: number, draw: boolean) => {
+    simT += dt;
+    const t = simT;
     const inp = input.read();
     const playing = mode === 'play';
 
     // ---- actions (play only) ----
-    if (playing) {
-      const riding = player.vehicle;
+    if (playing && hud?.destinationsOpen) {
+      // choosing where the auto should go
+      for (let i = 0; i < 9; i++) if (input.consume(`Digit${i + 1}`)) pickDestination(i);
+      if (input.consume('PadUp') || input.consume('ArrowUp')) hud.highlight(-1);
+      if (input.consume('PadDown') || input.consume('ArrowDown')) hud.highlight(1);
+      if (input.consume('KeyE') || input.consume('Enter')) hud.chooseHighlighted();
+      if (input.consume('Escape')) leaveAuto(false);
+    } else if (playing && riding) {
       if (input.consume('KeyE') || input.consume('KeyF')) {
-        if (riding) {
-          if (riding.kmh < 12) player.exit(scene, terrain);
+        // ask to stop here
+        if (riding.job === 'hired') { riding.route = null; riding.next = null; riding.job = 'arrived'; }
+      }
+    } else if (playing) {
+      const inVehicle = player.vehicle;
+      const myAuto = life.ride;
+      if (input.consume('KeyE') || input.consume('KeyF')) {
+        if (inVehicle) {
+          if (inVehicle.kmh < 12) player.exit(scene, terrain);
+        } else if (myAuto && myAuto.job === 'waiting' && life.wrap.dist(myAuto.x, myAuto.z, player.x, player.z) < 7) {
+          boardAuto(myAuto);
         } else {
           const nv = nearestVehicle();
           if (nv) { player.enter(nv); lastVehicle = nv; camYaw = nv.heading; }
         }
       }
-      if (input.consume('KeyV') && !riding) {
+      if (input.consume('KeyG') && !inVehicle) {
+        const a = life.hail(player.x, player.z);
+        if (!a) hud?.toast('No auto can get here — try nearer a road');
+        else if (a.job === 'waiting') hud?.toast('Your auto is waiting — hop in');
+        else hud?.toast('Auto! One is coming — wait by the road');
+      }
+      if (input.consume('KeyV') && !inVehicle) {
         const v = lastVehicle;
         if (Math.hypot(v.x - player.x, v.z - player.z) > 4) {
           const fx = -Math.sin(player.heading), fz = -Math.cos(player.heading);
@@ -223,6 +326,8 @@ async function start() {
       }
       if (input.consume('KeyC')) camDistScale = camDistScale === 1 ? 1.6 : camDistScale === 1.6 ? 0.7 : 1;
       if (input.consume('KeyH')) hud?.toggleHint();
+    }
+    if (playing) {
       if (inp.lookX || inp.lookY) {
         camYaw -= inp.lookX;
         camPitch = THREE.MathUtils.clamp(camPitch + inp.lookY, -0.05, 1.2);
@@ -238,7 +343,11 @@ async function start() {
       const y = vy.get(v) ?? target;
       vy.set(v, y + (target - y) * Math.min(1, dt * 12));
     }
-    player.update(dt, playing ? inp : idle, camYaw, terrain, vehicles);
+    if (riding) {
+      player.x = riding.x;
+      player.z = riding.z;
+      player.heading = riding.heading;
+    } else player.update(dt, playing ? inp : idle, camYaw, terrain, vehicles);
 
     // fold whoever crossed an edge back into the patch; the camera follows the focus across
     const focusBefore = player.vehicle ?? player;
@@ -257,6 +366,11 @@ async function start() {
     camFlat.x += focus.x - fbx;
     camFlat.z += focus.z - fbz;
 
+    // ---- the town ----
+    life.update(dt, focus.x, focus.z, actorBodies(), camYaw);
+    if (playing) autoRide();
+    life.render(focus.x, focus.z);
+
     // ---- place actors at their copy nearest the focus ----
     const near = (x: number, z: number): [number, number] => [
       x + Math.round((focus.x - x) / terrain.W) * terrain.W,
@@ -270,14 +384,16 @@ async function start() {
 
     // ---- curve, camera ----
     const fy = player.vehicle ? (vy.get(player.vehicle) ?? 0) : terrain.heightAt(player.x, player.z);
-    const spec = player.vehicle?.spec.cam ?? { dist: 4.8, height: 1.8, look: 1.5 };
+    const spec = player.vehicle?.spec.cam ?? (riding ? AUTO_CAM : { dist: 4.8, height: 1.8, look: 1.5 });
     const v = player.vehicle;
-    if (v && t - lastLook > 1.2 && Math.abs(v.speed) > 1) {
-      const target = v.speed >= 0 ? v.heading : v.heading + Math.PI;
+    // whatever you're moving in: your own vehicle or the auto
+    const mv = v ?? riding;
+    if (mv && t - lastLook > 1.2 && Math.abs(mv.speed) > 1) {
+      const target = mv.speed >= 0 ? mv.heading : mv.heading + Math.PI;
       camYaw += Math.atan2(Math.sin(target - camYaw), Math.cos(target - camYaw)) * Math.min(1, dt * 3);
       camPitch += (0.2 - camPitch) * Math.min(1, dt * 1.5);
     }
-    const dist = spec.dist * camDistScale * (v ? 1 + Math.abs(v.speed) / 120 : 1);
+    const dist = spec.dist * camDistScale * (mv ? 1 + Math.abs(mv.speed) / 120 : 1);
     const dx = focus.x + Math.sin(camYaw) * dist * Math.cos(camPitch);
     const dz = focus.z + Math.cos(camYaw) * dist * Math.cos(camPitch);
     const dy = Math.max(fy + 0.7, fy + spec.look + spec.height * 0.4 + dist * Math.sin(camPitch));
@@ -335,7 +451,7 @@ async function start() {
     camera.up.set(0, 1, 0);
     camera.lookAt(tmpB);
     if (v && v.impact > 0.2 && playing) camera.position.y += (Math.random() - 0.5) * v.impact * 0.4;
-    const fov = 55 + (v && playing ? Math.min(12, Math.abs(v.speed) * 0.28) : 0);
+    const fov = 55 + (mv && playing ? Math.min(12, Math.abs(mv.speed) * 0.28) : 0);
     camera.fov += (fov - camera.fov) * Math.min(1, dt * 4);
     camera.updateProjectionMatrix();
     pipeline.setClip(camera.near, camera.far);
@@ -352,13 +468,20 @@ async function start() {
 
     // HUD
     if (hud) {
+      hud.tick(dt);
       areaTimer -= dt;
       if (areaTimer <= 0) {
         areaTimer = 0.4;
         const a = areaLabel(patch, terrain, focus.x, focus.z);
         hud.setArea(a.n, a.mr);
       }
-      if (v) {
+      const myAuto = life.ride;
+      if (riding) {
+        hud.setDriving('Auto rickshaw', riding.speed * 3.6);
+        hud.setPrompt(riding.job === 'hired' ? `Meter ₹${autoFare(riding.odo)}` : null);
+        hud.setActionVisible(riding.job === 'hired');
+        hud.setHint(hintAuto);
+      } else if (v) {
         hud.setDriving(v.spec.name, v.kmh);
         hud.setPrompt(v.kmh < 3 ? `${input.isTouch ? 'Tap' : 'Press'} E to get off` : null);
         hud.setActionVisible(v.kmh < 12);
@@ -366,12 +489,18 @@ async function start() {
       } else {
         hud.setDriving(null);
         const nv = nearestVehicle();
-        hud.setPrompt(nv ? `${input.isTouch ? 'Tap' : 'Press'} E to ${nv.spec.kind === 'bike' ? 'ride' : 'drive'} the ${nv.spec.name}` : null);
-        hud.setActionVisible(!!nv);
+        const autoHere = myAuto && myAuto.job === 'waiting' && life.wrap.dist(myAuto.x, myAuto.z, player.x, player.z) < 7;
+        const tap = input.isTouch ? 'Tap' : 'Press';
+        hud.setPrompt(autoHere ? `${tap} E to get in the auto`
+          : nv ? `${tap} E to ${nv.spec.kind === 'bike' ? 'ride' : 'drive'} the ${nv.spec.name}`
+          : myAuto?.job === 'pickup' ? 'Auto on its way — wait by the road'
+          : myAuto?.job === 'waiting' ? 'Your auto is waiting' : null);
+        hud.setActionVisible(!!nv || !!autoHere);
         hud.setHint(hintFoot);
       }
     }
 
+    if (!draw) return;
     renderer.info.reset();
     pipeline.render();
     if (debug) {
@@ -383,12 +512,19 @@ async function start() {
         fpsT = 0;
       }
     }
+  };
+  const frameFn = () => {
+    tick(Math.max(1e-4, Math.min(clock.getDelta(), 1 / 20)), true);
     requestAnimationFrame(frameFn);
   };
   requestAnimationFrame(frameFn);
+  /** testing aid: run the game forward without waiting for frames */
+  const advance = (seconds: number, dt = 1 / 30) => {
+    for (let k = Math.ceil(seconds / dt); k > 0; k--) tick(dt, k === 1);
+  };
 
-  Object.assign(window, { game: { scene, patch, terrain, player, bike, harrier, camera, CURVE, get mode() { return mode; }, begin,
-    get camYaw() { return camYaw; }, set camYaw(v: number) { camYaw = v; lastLook = performance.now() / 1000; } } });
+  Object.assign(window, { game: { advance, scene, life, patch, terrain, player, bike, harrier, camera, CURVE, get mode() { return mode; }, begin,
+    get camYaw() { return camYaw; }, set camYaw(v: number) { camYaw = v; lastLook = simT; } } });
 }
 
 start().catch((e) => {
