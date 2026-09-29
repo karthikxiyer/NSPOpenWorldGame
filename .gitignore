@@ -1,7 +1,4 @@
 node_modules/
 dist/
-data/raw/*.json
-!data/raw/meta.json
 .DS_Store
 *.log
-public/world/

@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#c9dff0" />
+    <meta name="theme-color" content="#f0e2d2" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <title>NSP Open World</title>
-    <meta name="description" content="Ride a Honda CB350RS or drive a Tata Harrier Kaziranga across Nalasopara, Vasai and Virar." />
+    <title>NSP Loop</title>
+    <meta name="description" content="A 1 km miniature-planet loop from 3rd Road Taaki to Nalla Sopara station. Ride a Honda CB350RS or drive a Tata Harrier Kaziranga." />
   </head>
   <body>
     <canvas id="game"></canvas>
@@ -14,6 +14,7 @@
     <div id="hud" hidden>
       <div id="area"><span id="area-en"></span><span id="area-mr"></span></div>
       <div id="prompt" hidden></div>
+      <div id="hint"></div>
       <div id="speedo" hidden>
         <div id="speed">0</div>
         <div class="unit">km/h</div>
@@ -28,6 +29,7 @@
       <div id="touch-buttons">
         <button id="btn-action" class="tbtn">E</button>
         <button id="btn-alt" class="tbtn small">RUN</button>
+        <button id="btn-call" class="tbtn small">CALL</button>
       </div>
     </div>
 
@@ -40,19 +42,21 @@
           <tr><td>Run / handbrake</td><td>Shift / Space</td><td>X</td></tr>
           <tr><td>Get on / off</td><td>E</td><td>A</td></tr>
           <tr><td>Look around</td><td>Drag mouse</td><td>Right stick</td></tr>
+          <tr><td>Call your vehicle</td><td>V</td><td>B</td></tr>
           <tr><td>Camera distance</td><td>C</td><td>Y</td></tr>
+          <tr><td>Hide hints</td><td>H</td><td></td></tr>
         </table>
-        <p class="touch-only">On a phone: left thumb steers (push up to accelerate, down to brake), drag on the right to look, tap <b>E</b> near a vehicle to get on.</p>
+        <p class="touch-only">On a phone: left thumb steers (push up to accelerate, down to brake), drag on the right to look, tap <b>E</b> near a vehicle to get on, <b>CALL</b> to bring it to you.</p>
         <button id="help-close">Let's ride</button>
       </div>
     </div>
 
     <div id="loading">
       <div class="panel">
-        <h1>NSP Open World</h1>
-        <p class="sub">Nalasopara · Vasai · Virar</p>
+        <h1>NSP Loop</h1>
+        <p class="sub">3rd Road Taaki · Nalla Sopara · नालासोपारा</p>
         <div class="bar"><div id="load-bar"></div></div>
-        <p id="load-text">Loading map…</p>
+        <p id="load-text">Building the loop…</p>
       </div>
     </div>
 

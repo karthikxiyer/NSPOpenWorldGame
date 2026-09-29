@@ -96,6 +96,10 @@ export class Input {
       e.preventDefault();
       this.pressed.add('KeyE');
     });
+    document.getElementById('btn-call')!.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.pressed.add('KeyV');
+    });
     const alt = document.getElementById('btn-alt')!;
     alt.addEventListener('pointerdown', (e) => {
       e.preventDefault();
@@ -161,6 +165,7 @@ export class Input {
       const now = pad.buttons.map((b) => b.pressed);
       if (now[0] && !this.padPrev[0]) this.pressed.add('KeyE');
       if (now[3] && !this.padPrev[3]) this.pressed.add('KeyC');
+      if (now[1] && !this.padPrev[1]) this.pressed.add('KeyV');
       if (now[9] && !this.padPrev[9]) this.pressed.add('Escape');
       this.padPrev = now;
       break;

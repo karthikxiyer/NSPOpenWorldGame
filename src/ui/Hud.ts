@@ -21,9 +21,9 @@ export class Hud {
       if (e.code === 'Escape' || e.code === 'Enter') close();
     });
     try {
-      if (!localStorage.getItem('nsp.helpSeen')) {
+      if (!localStorage.getItem('nsploop.helpSeen')) {
         help.hidden = false;
-        localStorage.setItem('nsp.helpSeen', '1');
+        localStorage.setItem('nsploop.helpSeen', '1');
       }
     } catch {
       help.hidden = false;
@@ -50,6 +50,15 @@ export class Hud {
       this.vname.textContent = name;
     }
     this.altBtn.textContent = name ? 'BRAKE' : 'RUN';
+  }
+
+  setHint(text: string): void {
+    $('hint').textContent = text;
+  }
+
+  toggleHint(): void {
+    const h = $('hint');
+    h.hidden = !h.hidden;
   }
 
   setActionVisible(v: boolean): void {

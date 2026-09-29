@@ -1,20 +1,13 @@
 import * as THREE from 'three';
+import { cel } from '../core/toon';
 
 // Low-poly models built from primitives. All models face -Z (forward) with +Y up and origin on the ground.
 
-const matCache = new Map<string, THREE.Material>();
+/** Cel materials: metal gets a 4-band ramp and a lighter shadow tint, glass stays dark. */
 function mat(color: string, opts: { emissive?: string; metal?: boolean; glass?: boolean } = {}): THREE.Material {
-  const k = `${color}|${opts.emissive ?? ''}|${opts.metal ? 1 : 0}|${opts.glass ? 1 : 0}`;
-  let m = matCache.get(k);
-  if (!m) {
-    m = opts.glass
-      ? new THREE.MeshPhongMaterial({ color, shininess: 30, specular: new THREE.Color('#3a4650') })
-      : opts.metal
-      ? new THREE.MeshPhongMaterial({ color, shininess: 90, specular: new THREE.Color('#ffffff') })
-      : new THREE.MeshLambertMaterial({ color, emissive: opts.emissive ?? '#000000' });
-    matCache.set(k, m);
-  }
-  return m;
+  if (opts.glass) return cel({ color, bands: 2 });
+  if (opts.metal) return cel({ color, bands: 4, tint: 0x8a80a8 });
+  return cel({ color, emissive: opts.emissive ?? null });
 }
 
 function box(w: number, h: number, d: number, color: string | THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh {
@@ -26,6 +19,9 @@ function box(w: number, h: number, d: number, color: string | THREE.Material, x 
 function cyl(rt: number, rb: number, h: number, color: string | THREE.Material, seg = 12): THREE.Mesh {
   return new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), typeof color === 'string' ? mat(color) : color);
 }
+
+/** Soft shadow discs are only used when real shadow maps are off (phones). */
+export const blobShadows = { enabled: true };
 
 /** A soft round shadow disc under a model. */
 export function blobShadow(rx: number, rz: number): THREE.Mesh {
@@ -42,6 +38,9 @@ export function blobShadow(rx: number, rz: number): THREE.Mesh {
     new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false }),
   );
   m.rotation.x = -Math.PI / 2;
+  m.userData.blob = true;
+  m.userData.noOutline = true;
+  m.visible = blobShadows.enabled;
   m.position.y = 0.16;
   m.renderOrder = 1;
   return m;

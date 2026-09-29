@@ -12,7 +12,7 @@ html, body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: #c9dff0;
+  background: #f0e2d2;
   color: var(--ink);
   touch-action: none;
   user-select: none;
@@ -185,3 +185,17 @@ body.touch .touch-only { display: block; }
 }
 .tbtn.small { width: 60px; height: 60px; font-size: 13px; }
 .tbtn.active { background: rgba(245, 197, 24, 0.8); color: #111; }
+
+#hint {
+  position: absolute;
+  left: 50%;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  font-size: 13px;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(40, 30, 50, 0.85);
+  white-space: nowrap;
+  opacity: 0.92;
+}
+#hint[hidden] { display: none; }
+body.touch #hint { bottom: auto; top: max(64px, env(safe-area-inset-top)); }

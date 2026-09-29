@@ -1,250 +1,274 @@
 import * as THREE from 'three';
 import './style.css';
-import { LIFE_DESKTOP, LIFE_MOBILE, START } from './config';
+import { blobShadows } from './art/vehicleModels';
+import { hullOutlineTree, setOutlineResolution } from './core/outline';
+import { PAL } from './core/palette';
+import { Pipeline } from './core/post';
+import { Sky } from './core/sky';
 import { Player } from './entities/Player';
 import { CB350RS, HARRIER, Vehicle } from './entities/Vehicle';
 import { Input } from './input/Input';
-import { Life } from './life/Life';
-import { signBoard } from './life/models';
-import type { Body } from './life/Spatial';
+import { buildLoop } from './loop/build';
+import { START, zoneAt } from './loop/layout';
+import { frameAt, pin, toWorld } from './planet/planet';
 import { Hud, hideLoading, setLoading, showError } from './ui/Hud';
-import { World } from './world/World';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const input = new Input(canvas);
-const mobile = input.isTouch;
+const params = new URLSearchParams(location.search);
+const debug = params.has('debug');
+/** phones, or ?lite: no shadow maps, no supersampling */
+const mobile = input.isTouch || params.has('lite');
 
-// ---------- renderer / scene ----------
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: !mobile, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, mobile ? 1.25 : 1.75));
-renderer.setSize(innerWidth, innerHeight);
-renderer.outputColorSpace = THREE.SRGBColorSpace;
+// ---------- renderer, scene, lights ----------
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+renderer.toneMapping = THREE.NoToneMapping;
+renderer.info.autoReset = false;
+renderer.shadowMap.enabled = !mobile;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.setClearColor(new THREE.Color(PAL.fog), 1);
+blobShadows.enabled = !renderer.shadowMap.enabled;
 
-const SKY = new THREE.Color('#c9dff0');
 const scene = new THREE.Scene();
-scene.background = SKY;
-const viewDist = mobile ? 650 : 950;
-scene.fog = new THREE.Fog(SKY, viewDist * 0.3, viewDist);
+scene.fog = new THREE.Fog(PAL.fog, 70, 290);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.25, 600);
 
-const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.3, viewDist + 200);
-scene.add(new THREE.HemisphereLight('#dcecff', '#9c8a66', 1.9));
-const sun = new THREE.DirectionalLight('#fff4e0', 2.0);
-sun.position.set(-0.5, 1, 0.35).multiplyScalar(100);
-scene.add(sun);
+// Two-light anime setup: a warm quantised key, a strong cool bounce so shadows are coloured
+// rather than dark, a weak up-light, and a hemisphere with a warm dusty ground colour.
+// Directions are in the player's local frame (x along the loop, y up, z across).
+const sun = new THREE.DirectionalLight(PAL.sun, 2.7);
+// low afternoon sun raking across the street fronts
+const SUN_LOCAL = new THREE.Vector3(0.5, 0.62, -0.6).normalize();
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -38, right: 38, top: 38, bottom: -38, near: 1, far: 220 });
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.04;
+const fill = new THREE.DirectionalLight(PAL.fill, 1.2);
+const FILL_LOCAL = new THREE.Vector3(-0.6, 0.4, 0.6).normalize();
+const bounce = new THREE.DirectionalLight(PAL.bounce, 0.32);
+const BOUNCE_LOCAL = new THREE.Vector3(0.1, -0.4, 0.8).normalize();
+const hemi = new THREE.HemisphereLight(PAL.hemiSky, PAL.hemiGround, 1.35);
+scene.add(sun, sun.target, fill, fill.target, bounce, bounce.target, hemi);
 
-addEventListener('resize', () => {
-  renderer.setSize(innerWidth, innerHeight);
+const pipeline = new Pipeline(renderer, scene, camera, { lite: mobile });
+function resize() {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
-});
+  pipeline.setSize(innerWidth, innerHeight);
+  setOutlineResolution(pipeline.size.x, pipeline.size.y);
+}
+addEventListener('resize', resize);
+resize();
 
-// ---------- world & actors ----------
-const world = new World(mobile ? 650 : 900);
-scene.add(world.root);
+// ---------- actors ----------
 const player = new Player();
 const bike = new Vehicle(CB350RS);
 const harrier = new Vehicle(HARRIER);
 const vehicles = [bike, harrier];
-scene.add(player.model.root, bike.model.root, harrier.model.root);
+for (const root of [player.model.root, bike.model.root, harrier.model.root]) {
+  root.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh && !o.userData.blob) o.castShadow = true;
+  });
+  // hero outlines cost a draw call per part; phones rely on the screen-space ink alone
+  if (!mobile) hullOutlineTree(root, 0.0026);
+  scene.add(root);
+}
+/** vehicle the player used last: that's the one V calls */
+let lastVehicle: Vehicle = bike;
 
-// camera state
-let camYaw = 0;
-let camPitch = 0.28;
+// camera state (flat space)
+// opening frame: from behind the player, looking up at the Taaki with the board and bike in view
+let camYaw = Math.atan2(START.player.x - START.taaki.x, START.player.z - START.taaki.z);
+let camPitch = 0.12;
 let camDistScale = 1;
 let lastLook = -10;
-const camPos = new THREE.Vector3();
-const camTarget = new THREE.Vector3();
+const camFlat = new THREE.Vector3();
+let camInit = false;
 
-function project(lat: number, lon: number): { x: number; z: number } {
-  const { origin, scale } = world.index;
-  return { x: (lon - origin.lon) * scale.kx, z: -(lat - origin.lat) * scale.kz };
+const tmpV = new THREE.Vector3();
+const tmpT = new THREE.Vector3();
+const frame = frameAt(0, 0);
+const frameM = new THREE.Matrix4();
+
+function seatLight(light: THREE.DirectionalLight, local: THREE.Vector3, target: THREE.Vector3, dist: number) {
+  tmpV.copy(frame.east).multiplyScalar(local.x).addScaledVector(frame.up, local.y).addScaledVector(frame.north, local.z);
+  light.position.copy(target).addScaledVector(tmpV, dist);
+  light.target.position.copy(target);
+  light.target.updateMatrixWorld();
 }
 
-/** ?at=lat,lon overrides the default start (the 3rd Road Taaki board). */
-function spawnPoint(): { x: number; z: number; board: boolean } {
-  const q = new URLSearchParams(location.search).get('at');
-  if (q) {
-    const [lat, lon] = q.split(',').map(Number);
-    if (!isNaN(lat) && !isNaN(lon)) return { ...project(lat, lon), board: false };
-  }
-  return { ...project(START.lat, START.lon), board: true };
-}
-
-let life: Life | null = null;
-
-async function start() {
-  await world.init(setLoading);
-  const sp = spawnPoint();
-  await world.preload(sp.x, sp.z, setLoading);
-
-  // park both vehicles on the nearest road: the bike ahead with a clear road,
-  // the Harrier far enough behind that it stays out of the spawn camera
-  const road = world.nearestRoadPoint(sp.x, sp.z, 1, 7) ?? { x: sp.x, z: sp.z, heading: 0 };
-  const fx = -Math.sin(road.heading), fz = -Math.cos(road.heading);
-  bike.place(road.x, road.z, road.heading);
-  harrier.place(road.x - fx * 12, road.z - fz * 12, road.heading);
-  // player stands on the kerb side next to the bike, facing it
-  player.place(road.x + fz * 1.6 + fx * 0.5, road.z - fx * 1.6 + fz * 0.5, road.heading - Math.PI / 2);
-  camYaw = road.heading;
-  if (sp.board) {
-    // the board stands on the kerb just ahead of the bike, its face toward the rider
-    const board = signBoard(START.board);
-    board.position.set(road.x + fz * 2.6 + fx * 4, 0, road.z - fx * 2.6 + fz * 4);
-    board.rotation.y = road.heading;
-    scene.add(board);
-  }
-
-  setLoading(0.95, 'Waking up the streets…');
-  life = new Life(scene, world, mobile ? LIFE_MOBILE : LIFE_DESKTOP);
-
-  setLoading(1, 'Ready');
-  hideLoading();
-  const hud = new Hud();
-  loop(hud);
-}
-
-const playerBody: Body = { x: 0, z: 0, r: 0.4, kind: 'player', ref: player };
-const vehicleBodies = new Map<Vehicle, Body[]>();
-/** The player and both vehicles, as obstacles the traffic and people react to. */
-function actorBodies(): Body[] {
-  const out: Body[] = [];
-  if (!player.vehicle) {
-    playerBody.x = player.x;
-    playerBody.z = player.z;
-    out.push(playerBody);
-  }
-  for (const v of vehicles) {
-    let list = vehicleBodies.get(v);
-    if (!list) vehicleBodies.set(v, (list = v.spec.circles.map(() => ({ x: 0, z: 0, r: 0, kind: 'player' as const, ref: v }))));
-    v.circlesWorld().forEach((c, i) => Object.assign(list![i], c));
-    out.push(...list);
-  }
-  return out;
-}
-
-function nearestVehicle(): { v: Vehicle; d: number } | null {
-  let best: { v: Vehicle; d: number } | null = null;
+function nearestVehicle(): Vehicle | null {
+  let best: Vehicle | null = null, bd = 3.2;
   for (const v of vehicles) {
     const d = Math.hypot(v.x - player.x, v.z - player.z);
-    if (d < 3.2 && (!best || d < best.d)) best = { v, d };
+    if (d < bd) { bd = d; best = v; }
   }
   return best;
 }
 
-function loop(hud: Hud) {
-  const clock = new THREE.Clock();
-  let areaTimer = 0;
-  const debug = new URLSearchParams(location.search).has('debug');
-  let frames = 0, fpsTime = 0;
+async function start() {
+  setLoading(0.2, 'Building the loop…');
+  await new Promise((r) => setTimeout(r, 30));
+  const t0 = performance.now();
+  const world = buildLoop(scene);
+  const terrain = world.terrain;
+  if (debug) console.log(`loop built in ${Math.round(performance.now() - t0)} ms`);
+  const sky = new Sky(scene);
 
-  const frame = () => {
+  bike.place(START.bike.x, START.bike.z, START.bike.heading);
+  harrier.place(START.harrier.x, START.harrier.z, START.harrier.heading);
+  player.place(START.player.x, START.player.z, START.player.heading);
+
+  setLoading(1, 'Ready');
+  hideLoading();
+  const hud = new Hud();
+  const hintFoot = input.isTouch ? 'Left stick to walk · E to get on · CALL brings your ride · drag to look' : 'WASD walk · Shift run · E get on · V call your ride · C camera · drag to look · H hide';
+  const hintRide = input.isTouch ? 'Push up to go, down to brake · E to get off when stopped' : 'W/S throttle & brake · A/D steer · Space brake · E get off when stopped';
+  const vy = new Map<Vehicle, number>();
+
+  const clock = new THREE.Clock();
+  let areaTimer = 0, frames = 0, fpsT = 0;
+
+  const frameFn = () => {
     const dt = Math.max(1e-4, Math.min(clock.getDelta(), 1 / 20));
     const t = clock.elapsedTime;
     const inp = input.read();
-    const driving = player.vehicle;
+    const riding = player.vehicle;
 
-    // enter / exit
+    // ---- actions ----
     if (input.consume('KeyE') || input.consume('KeyF')) {
-      if (driving) {
-        if (driving.kmh < 12) player.exit(scene, world);
+      if (riding) {
+        if (riding.kmh < 12) player.exit(scene, terrain);
       } else {
         const nv = nearestVehicle();
         if (nv) {
-          player.enter(nv.v);
-          camYaw = nv.v.heading;
+          player.enter(nv);
+          lastVehicle = nv;
+          camYaw = nv.heading;
         }
       }
     }
+    if (input.consume('KeyV') && !riding) {
+      // bring the ride round: park it just ahead of you, on the road if you're near it
+      const v = lastVehicle;
+      if (Math.hypot(v.x - player.x, v.z - player.z) > 4) {
+        const fx = -Math.sin(player.heading), fz = -Math.cos(player.heading);
+        let x = player.x + fx * 3, z = player.z + fz * 3;
+        if (Math.abs(player.z) < 10) z = Math.max(-3.2, Math.min(3.2, z));
+        const res = terrain.collide(x, z, v.spec.kind === 'car' ? 1.2 : 0.6, true);
+        x = res.x;
+        z = res.z;
+        v.place(x, z, Math.abs(player.z) < 10 ? (fx >= 0 ? -Math.PI / 2 : Math.PI / 2) : player.heading);
+        vy.set(v, terrain.heightAt(x, z));
+      }
+    }
     if (input.consume('KeyC')) camDistScale = camDistScale === 1 ? 1.6 : camDistScale === 1.6 ? 0.7 : 1;
-
-    // camera look
+    if (input.consume('KeyH')) hud.toggleHint();
     if (inp.lookX || inp.lookY) {
       camYaw -= inp.lookX;
-      camPitch = THREE.MathUtils.clamp(camPitch + inp.lookY, -0.1, 1.2);
+      camPitch = THREE.MathUtils.clamp(camPitch + inp.lookY, -0.05, 1.2);
       lastLook = t;
     }
 
-    // simulate
-    for (const v of vehicles) v.update(dt, v === player.vehicle ? inp : null, world, vehicles);
-    player.update(dt, inp, camYaw, world, vehicles);
+    // ---- simulate (flat) ----
+    for (const v of vehicles) {
+      v.update(dt, v === player.vehicle ? inp : null, terrain, vehicles);
+      const target = terrain.heightAt(v.x, v.z);
+      const y = vy.get(v) ?? target;
+      const ny = y + (target - y) * Math.min(1, dt * 12);
+      vy.set(v, ny);
+      v.model.root.position.y = ny;
+      pin(v.model.root);
+    }
+    player.update(dt, inp, camYaw, terrain, vehicles);
+    if (!player.vehicle) {
+      player.model.root.position.y = terrain.heightAt(player.x, player.z);
+      pin(player.model.root);
+    }
 
-    const focus = player.vehicle ?? player;
-    world.update(focus.x, focus.z, t);
-    life?.update(dt, focus.x, focus.z, actorBodies());
-
-    // chase camera: swing back behind the vehicle unless the player is looking around
+    // ---- chase camera, computed flat then bent ----
     const v = player.vehicle;
-    const spec = v?.spec.cam ?? { dist: 4.6, height: 1.7, look: 1.5 };
+    const focus = v ?? player;
+    const fy = v ? (vy.get(v) ?? 0) : terrain.heightAt(player.x, player.z);
+    const spec = v?.spec.cam ?? { dist: 4.8, height: 1.8, look: 1.5 };
     if (v && t - lastLook > 1.2 && Math.abs(v.speed) > 1) {
       const target = v.speed >= 0 ? v.heading : v.heading + Math.PI;
-      let diff = target - camYaw;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      const diff = Math.atan2(Math.sin(target - camYaw), Math.cos(target - camYaw));
       camYaw += diff * Math.min(1, dt * 3);
-      camPitch += (0.22 - camPitch) * Math.min(1, dt * 1.5);
+      camPitch += (0.26 - camPitch) * Math.min(1, dt * 1.5);
     }
     const dist = spec.dist * camDistScale * (v ? 1 + Math.abs(v.speed) / 120 : 1);
-    camTarget.set(focus.x, spec.look, focus.z);
-    const bx = Math.sin(camYaw), bz = Math.cos(camYaw);
-    const desired = new THREE.Vector3(
-      focus.x + bx * dist * Math.cos(camPitch),
-      spec.look + spec.height * 0.4 + dist * Math.sin(camPitch),
-      focus.z + bz * dist * Math.cos(camPitch),
-    );
-    desired.y = Math.max(desired.y, 0.6);
-    if (camPos.lengthSq() === 0) camPos.copy(desired);
-    camPos.lerp(desired, Math.min(1, dt * 10));
-    camera.position.copy(camPos);
-    if (v && v.impact > 0.2) camera.position.y += (Math.random() - 0.5) * v.impact * 0.4;
-    camera.lookAt(camTarget);
-    const fov = 62 + (v ? Math.min(14, Math.abs(v.speed) * 0.3) : 0);
+    const desiredX = focus.x + Math.sin(camYaw) * dist * Math.cos(camPitch);
+    const desiredZ = focus.z + Math.cos(camYaw) * dist * Math.cos(camPitch);
+    const desiredY = Math.max(fy + 0.7, fy + spec.look + spec.height * 0.4 + dist * Math.sin(camPitch));
+    if (!camInit) { camFlat.set(desiredX, desiredY, desiredZ); camInit = true; }
+    const k = Math.min(1, dt * 10);
+    camFlat.x += (desiredX - camFlat.x) * k;
+    camFlat.y += (desiredY - camFlat.y) * k;
+    camFlat.z += (desiredZ - camFlat.z) * k;
+    toWorld(camFlat.x, camFlat.y, camFlat.z, camera.position);
+    frameAt(focus.x, focus.z, frame);
+    camera.up.copy(frame.up);
+    camera.lookAt(toWorld(focus.x, fy + spec.look, focus.z, tmpT));
+    if (v && v.impact > 0.2) camera.position.addScaledVector(frame.up, (Math.random() - 0.5) * v.impact * 0.4);
+    const fov = 55 + (v ? Math.min(12, Math.abs(v.speed) * 0.28) : 0);
     if (Math.abs(camera.fov - fov) > 0.05) {
       camera.fov += (fov - camera.fov) * Math.min(1, dt * 4);
       camera.updateProjectionMatrix();
     }
-    // keep the sun's light direction fixed relative to the player (no shadows, so position doesn't matter much)
-    sun.target.position.set(focus.x, 0, focus.z);
-    sun.position.set(focus.x - 50, 100, focus.z + 35);
 
-    // HUD
+    // ---- lights & sky follow the local frame ----
+    const ground = toWorld(focus.x, 0, focus.z, tmpT);
+    seatLight(sun, SUN_LOCAL, ground, 90);
+    seatLight(fill, FILL_LOCAL, ground, 60);
+    seatLight(bounce, BOUNCE_LOCAL, ground, 60);
+    sun.shadow.camera.up.copy(frame.north);
+    hemi.position.copy(frame.up);
+    frameM.makeBasis(frame.east, frame.up, frame.north);
+    sky.update(frameM, camera.position);
+
+    // ---- HUD ----
     areaTimer -= dt;
     if (areaTimer <= 0) {
-      areaTimer = 0.5;
-      const p = world.nearestPlace(focus.x, focus.z);
-      hud.setArea(p?.n ?? 'Vasai-Virar', p?.mr);
+      areaTimer = 0.4;
+      const z = zoneAt(focus.x);
+      hud.setArea(z.name, z.mr);
     }
     if (v) {
       hud.setDriving(v.spec.name, v.kmh);
       hud.setPrompt(v.kmh < 3 ? `${input.isTouch ? 'Tap' : 'Press'} E to get off` : null);
       hud.setActionVisible(v.kmh < 12);
+      hud.setHint(hintRide);
     } else {
       hud.setDriving(null);
       const nv = nearestVehicle();
-      const verb = nv?.v.spec.kind === 'bike' ? 'ride' : 'drive';
-      hud.setPrompt(nv ? `${input.isTouch ? 'Tap' : 'Press'} E to ${verb} the ${nv.v.spec.name}` : null);
+      hud.setPrompt(nv ? `${input.isTouch ? 'Tap' : 'Press'} E to ${nv.spec.kind === 'bike' ? 'ride' : 'drive'} the ${nv.spec.name}` : null);
       hud.setActionVisible(!!nv);
+      hud.setHint(hintFoot);
     }
 
-    renderer.render(scene, camera);
+    renderer.info.reset();
+    pipeline.render();
 
     if (debug) {
       frames++;
-      fpsTime += dt;
-      if (fpsTime > 1) {
+      fpsT += dt;
+      if (fpsT > 1) {
         console.log(`fps ${frames} calls ${renderer.info.render.calls} tris ${renderer.info.render.triangles}`);
         frames = 0;
-        fpsTime = 0;
+        fpsT = 0;
       }
     }
-    requestAnimationFrame(frame);
+    requestAnimationFrame(frameFn);
   };
-  requestAnimationFrame(frame);
+  requestAnimationFrame(frameFn);
 }
 
 // handy for testing from the console
 Object.assign(window, {
   game: {
-    world, player, bike, harrier, camera,
-    get life() { return life; },
+    player, bike, harrier, camera, pipeline,
     get camYaw() { return camYaw; },
     set camYaw(v: number) { camYaw = v; lastLook = performance.now() / 1000; },
   },
@@ -252,5 +276,5 @@ Object.assign(window, {
 
 start().catch((e) => {
   console.error(e);
-  showError(`Could not load the map: ${e.message}`);
+  showError(`Could not build the loop: ${e.message}`);
 });

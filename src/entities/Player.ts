@@ -1,12 +1,17 @@
 import type * as THREE from 'three';
 import type { InputState } from '../input/Input';
-import type { World } from '../world/World';
-import { animateWalk, makePerson, poseSeated, type PersonModel } from './models';
+import { animateWalk, blobShadows, makePerson, poseSeated, type PersonModel } from '../art/vehicleModels';
+import type { Terrain } from '../loop/Terrain';
 import type { Vehicle } from './Vehicle';
 
 const WALK = 3.2;
 const RUN = 7.5;
 const RADIUS = 0.35;
+
+/** Show or hide the model's own blob shadow (only ever shown when blob shadows are enabled). */
+function setBlob(root: THREE.Object3D, on: boolean): void {
+  for (const c of root.children) if (c.userData.blob) c.visible = on && blobShadows.enabled;
+}
 
 export class Player {
   readonly model: PersonModel = makePerson();
@@ -25,7 +30,7 @@ export class Player {
   }
 
   /** Move on foot relative to the camera yaw. */
-  update(dt: number, input: InputState, camYaw: number, world: World, vehicles: Vehicle[]): void {
+  update(dt: number, input: InputState, camYaw: number, world: Terrain, vehicles: Vehicle[]): void {
     if (this.vehicle) return;
     // camera-relative direction: forward = (-sin, -cos), right = (cos, -sin)
     const fx = -Math.sin(camYaw), fz = -Math.cos(camYaw);
@@ -71,19 +76,21 @@ export class Player {
     const m = this.model;
     m.root.removeFromParent();
     v.model.body.add(m.root);
+    // it was pinned to the planet while on foot; on the vehicle it is a plain child again
+    m.root.matrixAutoUpdate = true;
     // seat is the rider's hip position; the person's hip pivot is 0.88 m above its feet
     m.root.position.copy(v.model.seat).setY(v.model.seat.y - 0.88);
     m.root.rotation.set(0, 0, 0);
     poseSeated(m, v.spec.kind);
     m.helmet.visible = v.spec.kind === 'bike';
     // the blob shadow belongs to the vehicle now
-    m.root.children[m.root.children.length - 1].visible = false;
+    setBlob(m.root, false);
     // hide in the car: the tinted glass hides the driver anyway and avoids clipping
     m.root.visible = v.spec.kind === 'bike';
   }
 
   /** Step off to the left of the vehicle (kerb side in India). */
-  exit(scene: THREE.Object3D, world: World): boolean {
+  exit(scene: THREE.Object3D, world: Terrain): boolean {
     const v = this.vehicle;
     if (!v) return false;
     const side = v.spec.kind === 'car' ? 1.6 : 0.9;
@@ -100,7 +107,7 @@ export class Player {
     scene.add(m.root);
     m.root.visible = true;
     m.helmet.visible = false;
-    m.root.children[m.root.children.length - 1].visible = true;
+    setBlob(m.root, true);
     animateWalk(m, 0, 0);
     m.legL.rotation.z = m.legR.rotation.z = 0;
     this.speed = 0;

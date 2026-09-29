@@ -1,6 +1,6 @@
 import type { InputState } from '../input/Input';
-import type { World } from '../world/World';
-import { makeCB350RS, makeHarrierKaziranga, type VehicleModel } from './models';
+import { makeCB350RS, makeHarrierKaziranga, type VehicleModel } from '../art/vehicleModels';
+import type { Terrain } from '../loop/Terrain';
 
 export interface VehicleSpec {
   id: 'cb350rs' | 'harrier';
@@ -87,7 +87,7 @@ export class Vehicle {
     this.sync(0);
   }
 
-  update(dt: number, input: InputState | null, world: World, others: Vehicle[]): void {
+  update(dt: number, input: InputState | null, world: Terrain, others: Vehicle[]): void {
     if (dt <= 0) return;
     const s = this.spec;
     const v = this.speed;
@@ -133,7 +133,7 @@ export class Vehicle {
 
     // water / edge of the world: stop dead
     const probe = Math.sign(this.speed || 1) * (s.kind === 'car' ? 2.2 : 1.0);
-    if (world.isWater(this.x + this.forwardX * probe, this.z + this.forwardZ * probe) || !world.inBounds(this.x, this.z)) {
+    if (world.isWater(this.x + this.forwardX * probe, this.z + this.forwardZ * probe) || !world.inBounds(this.x, this.z, true)) {
       this.x = px;
       this.z = pz;
       this.impact = Math.min(1, Math.abs(this.speed) / 15);
@@ -148,10 +148,10 @@ export class Vehicle {
     return this.spec.circles.map(([off, r]) => ({ x: this.x + this.forwardX * off, z: this.z + this.forwardZ * off, r }));
   }
 
-  private collide(world: World, others: Vehicle[]): void {
+  private collide(world: Terrain, others: Vehicle[]): void {
     this.impact = 0;
     for (const c of this.circlesWorld()) {
-      const res = world.collide(c.x, c.z, c.r);
+      const res = world.collide(c.x, c.z, c.r, true);
       let dx = res.hit ? res.x - c.x : 0;
       let dz = res.hit ? res.z - c.z : 0;
       let nx = res.nx, nz = res.nz, hit = res.hit;
