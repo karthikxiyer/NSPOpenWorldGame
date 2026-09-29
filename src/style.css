@@ -107,7 +107,14 @@ html, body {
   padding: 24px;
   max-width: 520px;
   width: 100%;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
   box-shadow: var(--shadow);
+}
+@media (max-height: 500px) {
+  .panel { padding: 16px; }
+  .panel th, .panel td { padding: 3px 4px; }
+  .panel button#help-close { margin-top: 10px; padding: 8px; }
 }
 .panel h1 { margin: 0; font-size: 28px; }
 .panel h2 { margin-top: 0; }
