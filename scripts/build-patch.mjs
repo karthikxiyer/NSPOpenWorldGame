@@ -244,6 +244,7 @@ console.log(`roads: ${roads.length}`);
 
 // ---------------------------------------------------------------- rail
 const rail = [], platforms = [], stations = [];
+const platformRings = [], railLines = [];
 for (const el of load('rail')) {
   const t = el.tags || {};
   if (el.type === 'node' && t.railway === 'station') {
@@ -257,6 +258,7 @@ for (const el of load('rail')) {
     if (g.length > 3 && g.every((p) => inside(p, 2))) {
       const ring = g[0][0] === g.at(-1)[0] && g[0][1] === g.at(-1)[1] ? g.slice(0, -1) : g;
       platforms.push({ p: flat(ringArea(ring) < 0 ? ring.reverse() : ring) });
+      platformRings.push(ring);
       fillRings([ring], paint([196, 188, 176]));
     }
     continue;
@@ -266,6 +268,7 @@ for (const el of load('rail')) {
     const pts = densify(run, 8);
     strokeLine(pts, 5, paint([140, 126, 118]));
     rail.push({ p: flat(pts), m: !t.service ? 1 : undefined });
+    railLines.push(pts);
   }
 }
 console.log(`rail runs: ${rail.length}, platforms: ${platforms.length}, stations: ${stations.map((s) => s.n)}`);
@@ -287,7 +290,8 @@ function height(t, area, id) {
   return (3 + Math.floor(h * 4 + Math.min(area / 500, 3))) * 3.1 + 0.8;
 }
 const buildings = [];
-const bGrid = new Map(); // 20 m grid of building rings, for tree/tank placement
+const bGrid = new Map(); // 20 m grid of building records { r: ring, h, n?, t: tags }, for placement
+const bRecs = [];
 const cell = (x, z) => `${Math.floor(x / 20)},${Math.floor(z / 20)}`;
 for (const el of load('buildings')) {
   const t = el.tags || {};
@@ -302,18 +306,23 @@ for (const el of load('buildings')) {
     if (t.name) b.n = t.name;
     if (t.amenity === 'place_of_worship' || ['temple', 'church', 'mosque', 'religious'].includes(t.building)) b.k = 'worship';
     buildings.push(b);
-    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-    for (const [x, z] of ring) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
-    for (let cx = Math.floor(x0 / 20); cx <= Math.floor(x1 / 20); cx++) for (let cz = Math.floor(z0 / 20); cz <= Math.floor(z1 / 20); cz++) {
-      const k = `${cx},${cz}`;
-      if (!bGrid.has(k)) bGrid.set(k, []);
-      bGrid.get(k).push(ring);
-    }
+    const rec = { r: ring, h: b.h, n: t.name, t };
+    bRecs.push(rec);
+    addToGrid(rec);
+  }
+}
+function addToGrid(rec) {
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const [x, z] of rec.r) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  for (let cx = Math.floor(x0 / 20); cx <= Math.floor(x1 / 20); cx++) for (let cz = Math.floor(z0 / 20); cz <= Math.floor(z1 / 20); cz++) {
+    const k = `${cx},${cz}`;
+    if (!bGrid.has(k)) bGrid.set(k, []);
+    bGrid.get(k).push(rec);
   }
 }
 const inBuilding = (x, z, pad = 0) => {
   for (const [dx, dz] of pad ? [[0, 0], [pad, 0], [-pad, 0], [0, pad], [0, -pad]] : [[0, 0]]) {
-    for (const r of bGrid.get(cell(x + dx, z + dz)) || []) if (pointInRing(r, x + dx, z + dz)) return true;
+    for (const { r } of bGrid.get(cell(x + dx, z + dz)) || []) if (pointInRing(r, x + dx, z + dz)) return true;
   }
   return false;
 };
@@ -340,6 +349,354 @@ function nearestRoad(x, z) {
   return best;
 }
 const clearOfRoads = (x, z, pad) => { const r = nearestRoad(x, z); return !r || r.d > r.s.w / 2 + pad; };
+
+// ---------------------------------------------------------------- real places (milestone 2)
+// Signboards from OSM names, Station Road shopfronts, the station building and footbridges'
+// stairs, and the ST Depot bus stand. All placement is done here; the game only draws it.
+const pois = load('pois');
+const railDist = (x, z) => {
+  let d = Infinity;
+  for (const pts of railLines) for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+    if (Math.min(ax, bx) - d > x || Math.max(ax, bx) + d < x || Math.min(az, bz) - d > z || Math.max(az, bz) + d < z) continue;
+    const ex = bx - ax, ez = bz - az, l2 = ex * ex + ez * ez || 1;
+    const t = Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / l2));
+    d = Math.min(d, Math.hypot(ax + ex * t - x, az + ez * t - z));
+  }
+  return d;
+};
+/** true if a road (ignoring classes >= ignoreFrom) comes within its half-width + pad of the point */
+function onRoad(x, z, pad, ignoreFrom = 99) {
+  for (const s of segGrid.get(cell(x, z)) || []) {
+    if (s.c >= ignoreFrom) continue;
+    const ex = s.b[0] - s.a[0], ez = s.b[1] - s.a[1], l2 = ex * ex + ez * ez || 1;
+    const t = Math.max(0, Math.min(1, ((x - s.a[0]) * ex + (z - s.a[1]) * ez) / l2));
+    if (Math.hypot(s.a[0] + ex * t - x, s.a[1] + ez * t - z) < s.w / 2 + pad) return true;
+  }
+  return false;
+}
+const yawOf = (nx, nz) => +Math.atan2(nx, nz).toFixed(3); // an object's +z turned to face (nx, nz)
+/** a w (along a) by d (along the normal) rectangle centred on c */
+function rect(cx, cz, ax, az, w, d) {
+  const nx = -az, nz = ax;
+  return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, v]) => [cx + ax * u * w / 2 + nx * v * d / 2, cz + az * u * w / 2 + nz * v * d / 2]);
+}
+/** sample a rectangle every ~3 m: clear of buildings, roads, rail, platforms and the edges? */
+function rectClear(cx, cz, ax, az, w, d, { pad = 1, rail = 4, ignoreFrom = 99 } = {}) {
+  const nx = -az, nz = ax;
+  const nu = Math.max(2, Math.ceil(w / 3)), nv = Math.max(2, Math.ceil(d / 3));
+  for (let i = 0; i <= nu; i++) for (let j = 0; j <= nv; j++) {
+    const u = (i / nu - 0.5) * (w + pad * 2), v = (j / nv - 0.5) * (d + pad * 2);
+    const x = cx + ax * u + nx * v, z = cz + az * u + nz * v;
+    if (!inside([x, z], EDGE_CLEAR) || inBuilding(x, z) || onRoad(x, z, 0, ignoreFrom) || railDist(x, z) < rail) return false;
+    if (platformRings.some((r) => pointInRing(r, x, z))) return false;
+  }
+  return true;
+}
+/** claim a rectangle so later placement (and trees) keep out of it */
+function claim(ring, h) { addToGrid({ r: ring, h, t: {} }); }
+function axisOf(ring) {
+  const [cx, cz] = centroid(ring);
+  let sxx = 0, szz = 0, sxz = 0;
+  for (const [x, z] of ring) { sxx += (x - cx) ** 2; szz += (z - cz) ** 2; sxz += (x - cx) * (z - cz); }
+  const ang = 0.5 * Math.atan2(2 * sxz, sxx - szz), ax = Math.cos(ang), az = Math.sin(ang);
+  let lo = Infinity, hi = -Infinity;
+  for (const [x, z] of ring) { const t = (x - cx) * ax + (z - cz) * az; lo = Math.min(lo, t); hi = Math.max(hi, t); }
+  return { cx: cx + ax * (lo + hi) / 2, cz: cz + az * (lo + hi) / 2, ax, az, len: hi - lo };
+}
+/** each wall of a building ring with its outward normal */
+function walls(r) {
+  const out = [];
+  for (let i = 0; i < r.length; i++) {
+    const [ax, az] = r[i], [bx, bz] = r[(i + 1) % r.length];
+    const len = Math.hypot(bx - ax, bz - az);
+    if (len < 0.5) continue;
+    let nx = (bz - az) / len, nz = -(bx - ax) / len;
+    const mx = (ax + bx) / 2, mz = (az + bz) / 2;
+    if (pointInRing(r, mx + nx * 0.3, mz + nz * 0.3)) { nx = -nx; nz = -nz; }
+    out.push({ i, a: [ax, az], b: [bx, bz], len, nx, nz, mx, mz });
+  }
+  return out;
+}
+/** how well a wall faces a street: distance from the wall to the kerb, or Infinity */
+function streetGap(w, maxGap = 14) {
+  const q = nearestRoad(w.mx + w.nx * 2, w.mz + w.nz * 2);
+  if (!q) return { gap: Infinity };
+  const dx = q.px - w.mx, dz = q.pz - w.mz, d = Math.hypot(dx, dz) || 1;
+  const facing = (dx * w.nx + dz * w.nz) / d;
+  const gap = d - q.s.w / 2;
+  if (facing < 0.6 || gap > maxGap || gap < 0.5 || inBuilding(w.mx + w.nx * 1.2, w.mz + w.nz * 1.2)) return { gap: Infinity };
+  return { gap, road: q.s };
+}
+
+// ---- signboards on buildings, from OSM names
+function signKind(t) {
+  if (['hospital', 'clinic', 'dentist', 'doctors', 'pharmacy'].includes(t.amenity) || t.healthcare || t.shop === 'medical_supply' || t.shop === 'chemist') return 'health';
+  if (t.amenity === 'bank' || t.amenity === 'atm') return 'bank';
+  if (t.amenity === 'place_of_worship' || ['temple', 'church', 'mosque'].includes(t.building)) return 'worship';
+  if (t.amenity === 'cinema') return 'cinema';
+  if (['school', 'college', 'university', 'kindergarten'].includes(t.amenity)) return 'school';
+  if (t.leisure === 'park' || t.leisure === 'garden') return 'park';
+  if (t.amenity === 'fuel') return 'fuel';
+  if (t.shop || t.office || ['restaurant', 'food_court', 'fast_food', 'cafe', 'bar'].includes(t.amenity)) return 'shop';
+  return null;
+}
+const SUB = {
+  hospital: 'हॉस्पिटल', clinic: 'क्लिनिक', dentist: 'डेंटल क्लिनिक', pharmacy: 'मेडिकल', medical_supply: 'मेडिकल',
+  bank: 'बँक', cinema: 'सिनेमा', school: 'शाळा', college: 'महाविद्यालय', supermarket: 'सुपरमार्केट', bakery: 'बेकरी',
+  jewelry: 'ज्वेलर्स', stationery: 'स्टेशनरी', dairy: 'डेअरी', restaurant: 'रेस्टॉरंट', food_court: 'फूड सेंटर',
+  hairdresser: 'सलून', beauty: 'ब्युटी पार्लर', mobile_phone: 'मोबाईल', greengrocer: 'भाजी', clothes: 'कपडे', alcohol: 'वाईन शॉप',
+  appliance: 'इलेक्ट्रॉनिक्स', spices: 'मसाले', variety_store: 'नॉव्हेल्टी', convenience: 'स्टोअर', bar: 'बार', park: 'उद्यान', fuel: 'पेट्रोल पंप',
+};
+const signs = [];
+const signedWalls = new Set(); // "building#wall" keys that already carry a sign: shopfronts skip them
+const byWall = new Map();
+const mappedFronts = []; // shopfronts under mapped shops' boards (sign id < 0: no board of their own)
+const recsNear = (x, z) => [...new Set([...(bGrid.get(cell(x, z)) || []), ...(bGrid.get(cell(x + 12, z)) || []), ...(bGrid.get(cell(x - 12, z)) || []), ...(bGrid.get(cell(x, z + 12)) || []), ...(bGrid.get(cell(x, z - 12)) || [])])];
+function ringDist(r, x, z) {
+  if (pointInRing(r, x, z)) return 0;
+  let d = Infinity;
+  for (let i = 0; i < r.length; i++) {
+    const [ax, az] = r[i], [bx, bz] = r[(i + 1) % r.length], ex = bx - ax, ez = bz - az, l2 = ex * ex + ez * ez || 1;
+    const t = Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / l2));
+    d = Math.min(d, Math.hypot(ax + ex * t - x, az + ez * t - z));
+  }
+  return d;
+}
+const sources = [];
+for (const el of pois) {
+  const t = el.tags || {};
+  const lat = el.lat ?? el.center?.lat, lon = el.lon ?? el.center?.lon;
+  if (lat == null || !t.name || t.amenity === 'bus_station') continue;
+  const kind = signKind(t);
+  if (!kind) continue;
+  const p = proj(lat, lon);
+  if (!inside(p, EDGE_CLEAR)) continue;
+  sources.push({ n: t['name:en'] || t.name, mr: t['name:en'] ? t.name : t['name:mr'], kind, t, x: p[0], z: p[1], area: el.type !== 'node' });
+}
+for (const rec of bRecs) {
+  if (!rec.n) continue;
+  const kind = signKind(rec.t) ?? 'society';
+  const [x, z] = centroid(rec.r);
+  if (sources.some((s) => s.n === rec.n)) continue;
+  sources.push({ n: rec.n, mr: rec.t['name:mr'], kind, t: rec.t, x, z, rec });
+}
+let posted = 0;
+for (const s of sources) {
+  const sub = s.mr && s.mr !== s.n ? s.mr : SUB[s.t.amenity] ?? SUB[s.t.shop] ?? SUB[s.t.leisure] ?? (s.kind === 'health' ? 'हॉस्पिटल' : undefined);
+  // parks, the petrol pump and other open areas get a board on posts at the kerb
+  let rec = s.rec;
+  if (!rec && !s.area) {
+    let bd = 14;
+    for (const r of recsNear(s.x, s.z)) { const d = ringDist(r.r, s.x, s.z); if (d < bd) { bd = d; rec = r; } }
+  }
+  if (!rec) {
+    const q = nearestRoad(s.x, s.z);
+    if (!q || q.d > 120) continue;
+    const dx = s.x - q.px, dz = s.z - q.pz, d = Math.hypot(dx, dz) || 1, off = q.s.w / 2 + 1.6;
+    const x = q.px + (dx / d) * off, z = q.pz + (dz / d) * off;
+    if (inBuilding(x, z, 1.2) || !clearOfRoads(x, z, 0.8) || !inside([x, z], EDGE_CLEAR)) continue;
+    if (signs.some((o) => o.post && Math.hypot(o.x - x, o.z - z) < 6)) continue;
+    signs.push({ k: s.kind, n: s.n, s: sub, x: r1(x), z: r1(z), y: 1.7, yaw: yawOf(-dx / d, -dz / d), w: 3, post: 1 });
+    posted++;
+    continue;
+  }
+  // the wall that faces the street best (society names go on the street side too)
+  const ws = walls(rec.r);
+  let best = null, bg = Infinity;
+  for (const w of ws) {
+    if (w.len < 2.4) continue;
+    const { gap } = streetGap(w, 40);
+    const score = gap + Math.hypot(w.mx - s.x, w.mz - s.z) * 0.15;
+    if (score < bg) { bg = score; best = w; }
+  }
+  if (!best) best = ws.reduce((a, b) => (b.len > a.len ? b : a), ws[0]);
+  if (!best) continue;
+  const key = `${bRecs.indexOf(rec)}#${best.i}`;
+  if (!byWall.has(key)) byWall.set(key, { w: best, rec, list: [] });
+  byWall.get(key).list.push({ ...s, sub });
+}
+for (const [key, { w, rec, list }] of byWall) {
+  signedWalls.add(key);
+  // spread several signs along one wall, in order along it
+  const ux = (w.b[0] - w.a[0]) / w.len, uz = (w.b[1] - w.a[1]) / w.len;
+  list.sort((p, q) => (p.x - w.a[0]) * ux + (p.z - w.a[1]) * uz - ((q.x - w.a[0]) * ux + (q.z - w.a[1]) * uz));
+  const slot = w.len / list.length;
+  list.forEach((s, i) => {
+    const t = (i + 0.5) * slot;
+    const society = s.kind === 'society';
+    const width = Math.max(1.6, Math.min(society ? 7 : 4.2, slot - 0.3));
+    const hgt = width / 4;
+    // society names high on the facade; shops, clinics and banks above the ground floor
+    const y = society ? Math.max(2.9, rec.h - hgt / 2 - 0.5) : Math.min(rec.h - hgt / 2 - 0.2, s.kind === 'health' || s.kind === 'bank' ? 3.9 : 3.3);
+    if (y < hgt / 2 + 1.8) return;
+    // mapped shops, clinics and banks open onto the street under their board
+    if (['shop', 'health', 'bank'].includes(s.kind) && streetGap(w, 20).gap < Infinity && rec.h >= 4.2) {
+      mappedFronts.push(r1(w.a[0] + ux * t), r1(w.a[1] + uz * t), yawOf(w.nx, w.nz), r1(Math.min(slot - 0.1, 4.4)), -1 - (signs.length % 96), 1);
+    }
+    signs.push({ k: s.kind, n: s.n, s: s.sub, x: r1(w.a[0] + ux * t + w.nx * 0.02), z: r1(w.a[1] + uz * t + w.nz * 0.02), y: r1(y), yaw: yawOf(w.nx, w.nz), w: r1(width) });
+  });
+}
+console.log(`signs from OSM names: ${signs.length} (${posted} on posts)`);
+
+// ---- Station Road shopfronts: every ground floor facing the bazaar streets is a row of shops
+const SHOP_ROADS = new Set(['Station Road', 'ST Depot Road', 'Nallasopara Station Road', 'Depot Road', 'Nalasopara Flyover', 'Vasant Nagari Road', 'Zero Road']);
+const shops = [...mappedFronts]; // flat: x, z, yaw, width, sign id (-1 - n: under a mapped sign), open
+let sid = 0;
+for (let bi = 0; bi < bRecs.length; bi++) {
+  const rec = bRecs[bi];
+  if (rec.h < 4.2 || rec.t.amenity === 'place_of_worship') continue;
+  for (const w of walls(rec.r)) {
+    if (w.len < 3 || signedWalls.has(`${bi}#${w.i}`)) continue;
+    const { gap, road } = streetGap(w, 9);
+    if (!road || !SHOP_ROADS.has(road.n)) continue;
+    const k = Math.max(1, Math.floor(w.len / 3.4)), bw = w.len / k;
+    if (bw < 2.6) continue;
+    for (let i = 0; i < k; i++) {
+      const t = (i + 0.5) / k;
+      const x = w.a[0] + (w.b[0] - w.a[0]) * t, z = w.a[1] + (w.b[1] - w.a[1]) * t;
+      const h = hash(Math.round(x * 7) * 131 + Math.round(z * 7));
+      shops.push(r1(x), r1(z), yawOf(w.nx, w.nz), r1(bw), Math.floor(h * 1e4) % 96, hash(sid++ * 17 + 5) < 0.7 ? 1 : 0);
+    }
+  }
+}
+console.log(`shopfronts: ${shops.length / 6}`);
+
+// ---- street name boards near the ends of named streets
+const seenStreet = [];
+for (const r of roads) {
+  if (!r.n || r.ring || r.c > 5 || r.b) continue;
+  const n = r.p.length / 2;
+  let len = 0;
+  for (let i = 1; i < n; i++) len += Math.hypot(r.p[i * 2] - r.p[i * 2 - 2], r.p[i * 2 + 1] - r.p[i * 2 - 1]);
+  if (len < 50) continue;
+  for (const end of [0, n - 1]) {
+    const nb = end === 0 ? 1 : n - 2;
+    const ex = r.p[end * 2], ez = r.p[end * 2 + 1];
+    let dx = r.p[nb * 2] - ex, dz = r.p[nb * 2 + 1] - ez;
+    const dl = Math.hypot(dx, dz) || 1;
+    dx /= dl; dz /= dl; // into the street
+    const along = Math.min(10, dl), side = r.w / 2 + 1.3;
+    const x = ex + dx * along - dz * side, z = ez + dz * along + dx * side;
+    if (seenStreet.some((o) => o.n === r.n && Math.hypot(o.x - x, o.z - z) < 150)) continue;
+    if (!inside([x, z], EDGE_CLEAR) || inBuilding(x, z, 1) || !clearOfRoads(x, z, 0.5)) continue;
+    seenStreet.push({ n: r.n, x, z });
+    // the board stands across the pavement, readable from the junction
+    signs.push({ k: 'street', n: r.n, x: r1(x), z: r1(z), y: 2.2, yaw: yawOf(-dx, -dz), w: 2.4, post: 1 });
+  }
+}
+console.log(`street boards: ${seenStreet.length}`);
+
+// ---- solids the game collides with (station building, depot sheds, parked buses)
+const solids = [];
+const solid = (ring, h) => { solids.push({ p: flat(ring), h }); claim(ring, h); };
+
+// ---- the station: a booking office on the Depot Road side of the platforms, platform numbers
+let station = null;
+const st = stations[0];
+if (st && platformRings.length) {
+  const axes = platformRings.map(axisOf);
+  // number platforms west to east (Nalla Sopara's platform 1 is on the West side)
+  const order = axes.map((a, i) => i).sort((i, j) => axes[i].cx - axes[j].cx);
+  const near = axes.slice().sort((p, q) => Math.hypot(p.cx - st.x, p.cz - st.z) - Math.hypot(q.cx - st.x, q.cz - st.z))[0];
+  // the side of the tracks Depot Road arrives from
+  const q = nearestRoad(st.x - 30, st.z);
+  const ax = near.ax, az = near.az;
+  let nx = -az, nz = ax;
+  if (q && (q.px - near.cx) * nx + (q.pz - near.cz) * nz < 0) { nx = -nx; nz = -nz; }
+  const W = 26, D = 10;
+  let best = null;
+  for (let off = 6; off <= 70 && !best; off += 2) {
+    for (const al of [0, -8, 8, -16, 16, -26, 26]) {
+      const cx = st.x + nx * off + ax * al, cz = st.z + nz * off + az * al;
+      if (rectClear(cx, cz, ax, az, W, D, { pad: 1.5, rail: 3.5 })) { best = { cx, cz }; break; }
+    }
+  }
+  if (best) {
+    station = { x: r1(best.cx), z: r1(best.cz), yaw: yawOf(nx, nz), w: W, d: D, h: 6.5 };
+    solid(rect(best.cx, best.cz, ax, az, W, D), 6.5);
+    console.log(`station building at ${station.x},${station.z}`);
+  }
+  // platform number boards hang from each platform roof, near both ends
+  for (let k = 0; k < order.length; k++) {
+    const a = axes[order[k]];
+    for (const t of [-0.28, 0.28]) {
+      signs.push({ k: 'platform', n: String(k + 1), x: r1(a.cx + a.ax * a.len * t), z: r1(a.cz + a.az * a.len * t), y: 3.55, yaw: yawOf(a.ax, a.az), w: 1.6, hang: 1 });
+    }
+  }
+}
+
+// ---- the ST Depot: a bus stand beside Depot Road and the MSRTC yard behind it
+let depot = null;
+const busStop = pois.find((e) => e.tags?.amenity === 'bus_station' && e.center && inside(proj(e.center.lat, e.center.lon), 50));
+if (busStop) {
+  const [bx, bz] = proj(busStop.center.lat, busStop.center.lon);
+  // the street the stand opens onto (not the yard's service lanes)
+  let q = null;
+  for (const sg of roadSegs) {
+    if (sg.c > 5) continue;
+    const ex = sg.b[0] - sg.a[0], ez = sg.b[1] - sg.a[1], l2 = ex * ex + ez * ez || 1;
+    const t = Math.max(0, Math.min(1, ((bx - sg.a[0]) * ex + (bz - sg.a[1]) * ez) / l2));
+    const px = sg.a[0] + ex * t, pz = sg.a[1] + ez * t, d = Math.hypot(px - bx, pz - bz), l = Math.sqrt(l2);
+    if (!q || d < q.d) q = { d, px, pz, dx: ex / l, dz: ez / l, s: sg };
+  }
+  let ax = q.dx, az = q.dz;
+  if (ax < 0) { ax = -ax; az = -az; }
+  let nx = -az, nz = ax; // away from the road, into the stand
+  if ((bx - q.px) * nx + (bz - q.pz) * nz < 0) { nx = -nx; nz = -nz; }
+  const W = 38, D = 7;
+  let canopy = null;
+  for (let off = 10; off <= 40 && !canopy; off += 2) {
+    for (const al of [0, -6, 6, -12, 12, -20, 20]) {
+      const cx = q.px + nx * off + ax * al, cz = q.pz + nz * off + az * al;
+      // the stand needs room for the canopy and a row of buses behind it
+      const bayX = cx + nx * (D / 2 + 7), bayZ = cz + nz * (D / 2 + 7);
+      if (rectClear(cx, cz, ax, az, W, D, { pad: 1 }) && rectClear(bayX, bayZ, ax, az, W - 4, 12, { pad: 0.5 })) { canopy = { cx, cz }; break; }
+    }
+  }
+  if (canopy) {
+    const buses = [];
+    // buses nose-in to the platform, every 4.6 m
+    for (let u = -W / 2 + 4; u <= W / 2 - 4; u += 4.6) {
+      if (hash(Math.round(u * 10) + 77) < 0.25) continue; // an empty bay here and there
+      const x = canopy.cx + ax * u + nx * (D / 2 + 7.2), z = canopy.cz + az * u + nz * (D / 2 + 7.2);
+      buses.push([r1(x), r1(z), yawOf(-nx, -nz)]);
+      solid(rect(x, z, nx, nz, 11, 2.6), 3.2);
+    }
+    // the yard (landuse=industrial, name=Depot): an apron, a workshop shed and parked buses
+    const yard = [...byKind.get('industrial') || []].map((r) => r[0]).find((r) => r && pointInRing(r, canopy.cx + nx * 60, canopy.cz + nz * 60))
+      ?? [...byKind.get('industrial') || []].map((r) => r[0]).sort((p, q2) => Math.hypot(...centroid(p).map((v, i) => v - [bx, bz][i])) - Math.hypot(...centroid(q2).map((v, i) => v - [bx, bz][i])))[0];
+    let shed = null;
+    const apron = [rect(canopy.cx + nx * 8, canopy.cz + nz * 8, ax, az, W + 10, D + 26)];
+    if (yard && Math.hypot(...centroid(yard).map((v, i) => v - [bx, bz][i])) < 200) {
+      apron.push(yard);
+      const ya = axisOf(yard);
+      for (let tries = 0; tries < 40 && !shed; tries++) {
+        const u = (hash(tries * 3 + 1) - 0.5) * ya.len * 0.6, v = (hash(tries * 3 + 2) - 0.5) * 60;
+        const cx = ya.cx + ya.ax * u - ya.az * v, cz = ya.cz + ya.az * u + ya.ax * v;
+        if (pointInRing(yard, cx, cz) && rectClear(cx, cz, ya.ax, ya.az, 26, 14, { pad: 1, ignoreFrom: 6 })) shed = { x: r1(cx), z: r1(cz), yaw: yawOf(-ya.az, ya.ax), w: 26, d: 14, h: 7 };
+      }
+      if (shed) solid(rect(shed.x, shed.z, ya.ax, ya.az, shed.w, shed.d), shed.h);
+      // a row or two of buses parked in the yard
+      let parked = 0;
+      for (let v = -40; v <= 40 && parked < 9; v += 14) for (let u = -40; u <= 40 && parked < 9; u += 4.2) {
+        const cx = ya.cx + ya.ax * u - ya.az * v, cz = ya.cz + ya.az * u + ya.ax * v;
+        if (!pointInRing(yard, cx, cz) || !rectClear(cx, cz, -ya.az, ya.ax, 11, 2.6, { pad: 0.6, ignoreFrom: 6 })) continue;
+        buses.push([r1(cx), r1(cz), yawOf(-ya.az, ya.ax)]);
+        solid(rect(cx, cz, -ya.az, ya.ax, 11, 2.6), 3.2);
+        parked++;
+      }
+    }
+    for (const r of apron) fillRings([r], paint([160, 154, 156]));
+    // the stand's board at the kerb of Depot Road
+    const bxk = q.px + nx * (q.s.w / 2 + 2) + ax * (W / 2 - 3), bzk = q.pz + nz * (q.s.w / 2 + 2) + az * (W / 2 - 3);
+    signs.push({ k: 'depot', n: 'Nalasopara ST Depot', s: 'नालासोपारा आगार', x: r1(bxk), z: r1(bzk), y: 2.4, yaw: yawOf(-nx, -nz), w: 5, post: 1 });
+    depot = { x: r1(canopy.cx), z: r1(canopy.cz), yaw: yawOf(nx, nz), w: W, d: D, buses, shed };
+    const cring = rect(canopy.cx, canopy.cz, ax, az, W, D);
+    claim(cring, 4);
+    console.log(`ST Depot stand at ${depot.x},${depot.z}: ${buses.length} buses${shed ? ', workshop shed' : ''}`);
+  }
+}
 
 // ---------------------------------------------------------------- trees
 const trees = [];
@@ -388,14 +745,19 @@ if (road0) {
 // ---------------------------------------------------------------- labels for the HUD
 const labels = [{ n: '3rd Road Taaki', x: 0, z: 0, r: 90 }];
 for (const s of stations) labels.push({ n: `${s.n} Station`, mr: s.mr, x: s.x, z: s.z, r: 160 });
-for (const el of load('pois')) {
+for (const el of pois) {
   const t = el.tags || {};
   const lat = el.lat ?? el.center?.lat, lon = el.lon ?? el.center?.lon;
   if (lat == null || !t.name) continue;
   const p = proj(lat, lon);
   if (!inside(p)) continue;
   if (t.amenity === 'bus_station') labels.push({ n: 'ST Depot', mr: 'एस.टी. डेपो', x: r1(p[0]), z: r1(p[1]), r: 140 });
-  else if (t.amenity === 'cinema' || t.leisure === 'park') labels.push({ n: t.name, x: r1(p[0]), z: r1(p[1]), r: 70 });
+  else if (t.amenity === 'cinema' || t.leisure === 'park') labels.push({ n: t['name:en'] || t.name, x: r1(p[0]), z: r1(p[1]), r: 70 });
+}
+// the signboards double as landmarks: walk past a shop or clinic and the HUD names it
+for (const s of signs) {
+  if (s.k === 'street' || s.k === 'platform' || s.k === 'depot' || s.k === 'park') continue;
+  labels.push({ n: s.n, x: s.x, z: s.z, r: s.k === 'shop' ? 10 : s.k === 'society' ? 16 : 24 });
 }
 const namedRoads = new Map();
 for (const s of roadSegs) if (s.n && s.c <= 5) {
@@ -426,6 +788,7 @@ const patch = {
   ground: { w: IW, h: IH, px: PX },
   roads, buildings, rail, platforms, trees, stations, places, labels, roadNames,
   tank, spawn,
+  signs, shops, station, depot, solids,
   attribution: '© OpenStreetMap contributors (ODbL)',
 };
 const json = JSON.stringify(patch);

@@ -48,6 +48,7 @@ export class Terrain {
     this.H = b.maxZ - b.minZ;
     for (const bd of patch.buildings) this.addFootprint(bd.p, false, bd.h);
     for (const pl of patch.platforms) this.addFootprint(pl.p, true, 0.92);
+    for (const so of patch.solids ?? []) this.addFootprint(so.p, false, so.h);
     // water mask: the builder marks water pixels with alpha 254
     const c = document.createElement('canvas');
     c.width = groundImg.width;

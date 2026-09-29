@@ -5,6 +5,7 @@ import { cel } from '../core/toon';
 import { curveTree } from './curve';
 import { Batch, template } from './geo';
 import type { Patch, PBuilding, PRoad } from './patch';
+import { buildPlaces, createSignAtlas } from './places';
 import type { Terrain } from './Terrain';
 
 const CHUNK = 200;
@@ -180,6 +181,7 @@ function dashes(b: Batch, p: number[], y: number, dash: number, gap: number, hw:
 const ROAD_COLOR: Record<number, number> = { 1: 0x716c7c, 2: 0x76717f, 3: 0x7c7785, 4: 0x827d8c, 5: 0x8c8794, 6: 0x96909a, 7: 0xb49a78, 8: 0xbdb2a4, 9: 0xc4b596 };
 
 function road(b: Batch, r: PRoad) {
+  if (r.b && r.c >= 8) return; // footbridges are drawn up in the air (places.ts)
   const y = 0.05 + (10 - r.c) * 0.008;
   const hw = r.w / 2;
   const p = extendEnds(r.p, Math.min(hw, 3));
@@ -244,6 +246,26 @@ function building(walls: Batch, solid: Batch, rng: Rng, bd: PBuilding) {
 
 // ---------------------------------------------------------------------------------------------
 // railway platforms: concrete sides, grey top with a yellow edge band, a roof on columns
+//
+// The curve bends vertices, not faces: a platform drawn as a few 200 m triangles would sag below
+// the ground in the middle. Long faces are split until no edge is longer than FINE metres.
+
+const FINE = 8;
+
+function fineTri(b: Batch, a: number[], c: number[], d: number[], n: number[], color: number) {
+  const l0 = Math.hypot(c[0] - a[0], c[2] - a[2]), l1 = Math.hypot(d[0] - c[0], d[2] - c[2]), l2 = Math.hypot(a[0] - d[0], a[2] - d[2]);
+  const m = Math.max(l0, l1, l2);
+  if (m <= FINE) { b.tri(a, c, d, n, color); return; }
+  const mid = (p: number[], q: number[]) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2];
+  if (m === l0) { const e = mid(a, c); fineTri(b, a, e, d, n, color); fineTri(b, e, c, d, n, color); }
+  else if (m === l1) { const e = mid(c, d); fineTri(b, a, c, e, n, color); fineTri(b, a, e, d, n, color); }
+  else { const e = mid(d, a); fineTri(b, a, c, e, n, color); fineTri(b, e, c, d, n, color); }
+}
+
+function fineQuad(b: Batch, a: number[], c: number[], d: number[], e: number[], n: number[], color: number) {
+  fineTri(b, a, c, d, n, color);
+  fineTri(b, a, d, e, n, color);
+}
 
 function platform(b: Batch, p: number[]): { c: number[]; a: number[]; len: number } {
   const n = p.length / 2, h = 0.92;
@@ -256,13 +278,13 @@ function platform(b: Batch, p: number[]): { c: number[]; a: number[]; len: numbe
     const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
     if (len < 0.05) continue;
     const nx = (sign * dz) / len, nz = (sign * -dx) / len;
-    b.quad([ax, 0, az], [bx, 0, bz], [bx, h, bz], [ax, h, az], [nx, 0, nz], PAL.concrete);
-    b.quad([ax, h, az], [bx, h, bz], [bx - nx * 0.45, h + 0.005, bz - nz * 0.45], [ax - nx * 0.45, h + 0.005, az - nz * 0.45], UP, PAL.platformEdge);
+    fineQuad(b, [ax, 0, az], [bx, 0, bz], [bx, h, bz], [ax, h, az], [nx, 0, nz], PAL.concrete);
+    fineQuad(b, [ax, h, az], [bx, h, bz], [bx - nx * 0.45, h + 0.005, bz - nz * 0.45], [ax - nx * 0.45, h + 0.005, az - nz * 0.45], UP, PAL.platformEdge);
   }
   const contour: THREE.Vector2[] = [];
   for (let i = 0; i < n; i++) contour.push(new THREE.Vector2(p[i * 2], p[i * 2 + 1]));
   const tris = THREE.ShapeUtils.triangulateShape(contour, []);
-  for (const [a, c, d] of tris) b.tri([p[a * 2], h, p[a * 2 + 1]], [p[c * 2], h, p[c * 2 + 1]], [p[d * 2], h, p[d * 2 + 1]], UP, PAL.platform);
+  for (const [a, c, d] of tris) fineTri(b, [p[a * 2], h, p[a * 2 + 1]], [p[c * 2], h, p[c * 2 + 1]], [p[d * 2], h, p[d * 2 + 1]], UP, PAL.platform);
   // principal axis of the platform
   let cx = 0, cz = 0;
   for (let i = 0; i < n; i++) { cx += p[i * 2]; cz += p[i * 2 + 1]; }
@@ -284,8 +306,8 @@ function platform(b: Batch, p: number[]): { c: number[]; a: number[]; len: numbe
   }
   const corner = (u: number, v: number) => [c[0] + ax[0] * u + nx * v, h + 3.3, c[1] + ax[1] * u + nz * v];
   const q = [corner(-roofLen / 2, -roofW / 2), corner(roofLen / 2, -roofW / 2), corner(roofLen / 2, roofW / 2), corner(-roofLen / 2, roofW / 2)];
-  b.quad(q[0], q[1], q[2], q[3], UP, 0x9aa2a8);
-  b.quad(q[0], q[3], q[2], q[1], [0, -1, 0], 0xd7d2c8);
+  fineQuad(b, q[0], q[1], q[2], q[3], UP, 0x9aa2a8);
+  fineQuad(b, q[0], q[3], q[2], q[1], [0, -1, 0], 0xd7d2c8);
   return { c, a: ax, len };
 }
 
@@ -386,6 +408,15 @@ export function buildWorld(patch: Patch, groundImg: HTMLImageElement, terrain: T
   }
   const platformAxes: { c: number[]; a: number[]; len: number }[] = [];
   for (const pl of patch.platforms) platformAxes.push(platform(solid[chunkOf(pl.p[0], pl.p[1])], pl.p));
+  const signs = Array.from({ length: nx * nz }, () => new Batch());
+  const atlas = createSignAtlas();
+  buildPlaces(patch, {
+    solid: (x, z) => solid[chunkOf(x, z)],
+    signs: (x, z) => signs[chunkOf(x, z)],
+    terrain,
+    platforms: platformAxes,
+  }, atlas);
+  atlas.texture.needsUpdate = true;
   for (const [x, z, k] of patch.trees) {
     tree(solid[chunkOf(x, z)], rng, x, z, k);
     terrain.addCircle(x, z, 0.3);
@@ -399,6 +430,7 @@ export function buildWorld(patch: Patch, groundImg: HTMLImageElement, terrain: T
   const groundMat = cel({ map: tex, bands: 2 });
   const wallMat = cel({ vertexColors: true, map: windowTexture() });
   const solidMat = cel({ vertexColors: true });
+  const signMat = cel({ vertexColors: true, map: atlas.texture, bands: 'soft3' });
   const gw = patch.ground.w * patch.ground.px, gh = patch.ground.h * patch.ground.px;
 
   for (let j = 0; j < nz; j++) {
@@ -414,6 +446,11 @@ export function buildWorld(patch: Patch, groundImg: HTMLImageElement, terrain: T
       if (!solid[k].empty) {
         const m = new THREE.Mesh(solid[k].toGeometry(), solidMat);
         m.castShadow = m.receiveShadow = true;
+        group.add(m);
+      }
+      if (!signs[k].empty) {
+        const m = new THREE.Mesh(signs[k].toGeometry(), signMat);
+        m.receiveShadow = true;
         group.add(m);
       }
       if (!walls[k].empty) {

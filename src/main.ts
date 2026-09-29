@@ -387,7 +387,7 @@ async function start() {
   };
   requestAnimationFrame(frameFn);
 
-  Object.assign(window, { game: { patch, terrain, player, bike, harrier, camera, CURVE, get mode() { return mode; }, begin,
+  Object.assign(window, { game: { scene, patch, terrain, player, bike, harrier, camera, CURVE, get mode() { return mode; }, begin,
     get camYaw() { return camYaw; }, set camYaw(v: number) { camYaw = v; lastLook = performance.now() / 1000; } } });
 }
 

@@ -20,6 +20,26 @@ export interface PBuilding {
   k?: 'worship';
 }
 
+export type SignKind = 'shop' | 'health' | 'bank' | 'worship' | 'cinema' | 'school' | 'park' | 'fuel' | 'society' | 'street' | 'platform' | 'depot' | 'station';
+
+/** A signboard: on a wall (default), on two posts, or hanging from a platform roof. */
+export interface PSign {
+  k: SignKind;
+  n: string;
+  /** second line, usually Marathi */
+  s?: string;
+  x: number;
+  z: number;
+  /** height of the board's centre */
+  y: number;
+  /** facing: the board's front points along (sin yaw, cos yaw) */
+  yaw: number;
+  /** width; every board is 4:1 */
+  w: number;
+  post?: 1;
+  hang?: 1;
+}
+
 export interface Patch {
   origin: { lat: number; lon: number };
   scale: { kx: number; kz: number };
@@ -37,6 +57,18 @@ export interface Patch {
   roadNames: { n: string; x: number; z: number }[];
   tank: { x: number; z: number; yaw: number };
   spawn: { x: number; z: number; heading: number; side: number };
+  signs: PSign[];
+  /** shopfronts, flat: x, z, yaw, width, sign id (negative: under a mapped shop's own board), open (1) or shuttered (0) */
+  shops: number[];
+  station: { x: number; z: number; yaw: number; w: number; d: number; h: number } | null;
+  depot: {
+    x: number; z: number; yaw: number; w: number; d: number;
+    /** [x, z, yaw] */
+    buses: [number, number, number][];
+    shed: { x: number; z: number; yaw: number; w: number; d: number; h: number } | null;
+  } | null;
+  /** extra footprints to collide with: station building, depot shed, parked buses */
+  solids: { p: number[]; h: number }[];
 }
 
 export async function loadPatch(): Promise<{ patch: Patch; ground: HTMLImageElement }> {

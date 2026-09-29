@@ -43,7 +43,8 @@ renderer (no shadow maps or supersampling), `?debug` logs FPS and draw calls.
 - `scripts/build-patch.mjs` cuts the patch out of the raw OSM extract in `data/raw/` (clipping
   roads to the edges, dropping buildings near them, adding the ring road), paints a 2 m/px
   landcover texture, places trees along real roads and in parks, and stands the tank beside the
-  road at the start point.
+  road at the start point. It also places the signboards, shopfronts, station building and bus
+  stand; `src/world/places.ts` draws them, with every sign face in one canvas atlas.
 - `src/world/curve.ts` bends everything in the vertex shader around the player. A small radius
   makes the title planet; a large one the gentle horizon. Animating it is the unroll.
 - The map is split into 200 m chunks; each frame every chunk moves to its copy nearest the player,
@@ -53,13 +54,23 @@ renderer (no shadow maps or supersampling), `?debug` logs FPS and draw calls.
   [Sakura Crossing](https://github.com/Kenton-GMI/sakura-crossing) (MIT). See
   `THIRD_PARTY_NOTICES.md`.
 
+- **Real places.** Shops, clinics, hospitals, the bank, temples, the cinema and parks mapped in
+  OSM carry their real names on signboards (with Marathi where known); named buildings show their
+  society name; named streets get blue boards at their ends. Walk past one and the HUD names it.
+- **Station Road bazaar.** Ground floors facing Station Road, ST Depot Road and the other market
+  streets are rows of shops — open counters or shutters, awnings, bilingual boards. These shop
+  names are generated (typical Nalasopara names), not real businesses.
+- **Nalla Sopara station and the ST Depot.** A booking office at the end of Depot Road, numbered
+  platforms, footbridges with stairs down to the platforms; the MSRTC stand with its canopy,
+  red buses in the bays and the yard's workshop behind.
+
 OpenStreetMap is incomplete here: some blocks have fewer buildings than in reality, and most
 building heights are estimated.
 
 ## Roadmap
 
 1. ✅ Real map, title planet and unroll, curved horizon, wrap-around, the tank, vehicles
-2. Real places detailed: signboards from OSM names, the station, the ST Depot, Station Road shops
+2. ✅ Real places detailed: signboards from OSM names, the station, the ST Depot, Station Road shops
 3. Life: traffic on the real road network, pedestrians, animals, Western Line locals, hailing an auto
 4. Polish: gulmohar petals, street ambience, phone tuning
 
