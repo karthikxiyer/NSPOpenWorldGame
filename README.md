@@ -10,3 +10,30 @@ Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright
 
 Raw OSM data lives in `data/raw/` and is fetched by the **Fetch OSM data** GitHub
 Actions workflow (`scripts/fetch-osm.sh`). Run it from the Actions tab to refresh.
+
+## Running locally
+
+```bash
+npm install
+npm run build:tiles   # data/raw -> public/world (tiles + ground texture)
+npm run dev           # http://localhost:5173
+```
+
+Useful URL parameters: `?at=19.4674,72.7331` spawns at a latitude/longitude
+(e.g. Arnala beach), `?debug` logs FPS and draw calls to the console.
+
+## Controls
+
+| Action | Keyboard | Gamepad | Touch |
+| --- | --- | --- | --- |
+| Move / drive | WASD / arrows | Left stick, RT / LT | Left stick |
+| Run / handbrake | Shift / Space | X | RUN / BRAKE |
+| Get on / off | E | A | E |
+| Look around | Drag mouse | Right stick | Drag right side |
+| Camera distance | C | Y | – |
+
+## Deploying
+
+The **Build and deploy** workflow builds the tiles and the bundle on every push
+and publishes to GitHub Pages from the default branch. Enable it once under
+*Settings → Pages → Source: GitHub Actions*.
